@@ -4,5 +4,4 @@ requests==2.31.0
 speech_recognition==3.10.1
 pydub==0.25.1
 spacy==3.7.4
-https://github.com/explosion/spacy-models/releases/download/pt_core_news_sm-3.7.0/pt_core_news_sm-3.7.0.tar.gz
 gunicorn==21.2.0

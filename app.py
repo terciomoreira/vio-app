@@ -16,9 +16,15 @@ sys.modules['aifc'] = types.ModuleType('aifc')
 # Inicializa o Flask
 app = Flask(__name__)
 
-# Carrega o modelo de IA em Português do SpaCy
+# Garante o download e carregamento do modelo de IA em Português
 try:
-    nlp = spacy.load("pt_core_news_sm")
+    try:
+        nlp = spacy.load("pt_core_news_sm")
+    except OSError:
+        print("📥 Modelo pt_core_news_sm não encontrado. Baixando automático...")
+        from spacy.cli import download
+        download("pt_core_news_sm")
+        nlp = spacy.load("pt_core_news_sm")
     print("🚀 IA do SpaCy carregada com sucesso!")
 except Exception as e:
     print(f"❌ Erro ao carregar o SpaCy: {e}")
