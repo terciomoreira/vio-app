@@ -3,5 +3,5 @@ twilio==9.0.4
 requests==2.31.0
 SpeechRecognition
 pydub==0.25.1
-spacy==3.7.4
+spacy>=3.7.4 --only-binary=:all:
 gunicorn==21.2.0
