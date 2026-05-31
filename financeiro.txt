@@ -1,0 +1,7 @@
+Valor: 20€ | Local: mercado | Categoria: Outros
+Valor: 20€ | Local: restaurante japonês | Categoria: Outros
+Valor: 20€ | Local: Pingo Doce | Categoria: Alimentação
+Valor: 45 | Local: Continente | Categoria: Alimentação
+Valor: 35 | Local: Mercadona | Categoria: Alimentação
+Valor: 17,90 | Local: Continente | Categoria: Alimentação
+Valor: 35,00 | Local: Mercadona | Categoria: Alimentação
