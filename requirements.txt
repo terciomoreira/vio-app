@@ -1,7 +1,7 @@
 Flask==3.0.2
 twilio==9.0.4
 requests==2.31.0
-speech_recognition==3.10.1
+SpeechRecognition
 pydub==0.25.1
 spacy==3.7.4
 gunicorn==21.2.0
