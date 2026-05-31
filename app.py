@@ -1,15 +1,29 @@
-from flask import Flask, request
-from twilio.twiml.messaging_response import MessagingResponse
-import os
-import re
-import requests
-import speech_recognition as sr
-from pydub import AudioSegment
+import spacy
 from datetime import datetime
+from pydub import AudioSegment
+import speech_recognition as sr
+import requests
+import re
+import os
+from twilio.twiml.messaging_response import MessagingResponse
+from flask import Flask, request
+import sys
+import types
+# Correção essencial para compatibilidade com Python 3.14 no Render (Simulação do módulo aifc)
+sys.modules['aifc'] = types.ModuleType('aifc')
 
+
+# Inicializa o Flask
 app = Flask(__name__)
 
-# Dicionário de contingência vazio para manter compatibilidade sem estourar a RAM
+# Carrega o modelo de IA em Português do SpaCy
+try:
+    nlp = spacy.load("pt_core_news_sm")
+    print("🚀 IA do SpaCy carregada com sucesso!")
+except Exception as e:
+    print(f"❌ Erro ao carregar o SpaCy: {e}")
+
+# Dicionário de contingência mantido para compatibilidade
 nlp_modelos = {}
 
 
@@ -28,7 +42,7 @@ def analisar_tipo_fluxo(frase_lower):
         "ganado", "ingreso", "sueldo", "recibido",
         "earned", "received", "income", "salary", "deposit",
         "reçu", "gagné", "salaire", "facture",
-        "получил", "доход", "зарплата", "دخل", "استلمت", "راتب", "收到", "收入", "工资"
+        "получил", "доход", "зарплата", "دخل", "استلمت", "راتb", "收到", "收入", "工资"
     ]
     if any(g in frase_lower for g in ganhos):
         return "Entrada"
@@ -99,7 +113,6 @@ def transcrever_audio_whatsapp(url_audio):
         reconhecedor = sr.Recognizer()
         with sr.AudioFile(arquivo_wav) as fonte:
             dados_audio = reconhecedor.record(fonte)
-            # Definido explicitamente para Português
             texto_transcrito = reconhecedor.recognize_google(
                 dados_audio, language="pt-PT")
 
