@@ -1,15 +1,15 @@
-import spacy
-from datetime import datetime
-from pydub import AudioSegment
-import speech_recognition as sr
-import requests
-import re
-import os
-from twilio.twiml.messaging_response import MessagingResponse
 from flask import Flask, request
+from twilio.twiml.messaging_response import MessagingResponse
+import os
+import re
+import requests
+import speech_recognition as sr
+from pydub import AudioSegment
+from datetime import datetime
+import spacy
 import sys
 import types
-# Correção essencial para compatibilidade com Python 3.14 no Render (Simulação do módulo aifc)
+# ESTA CORREÇÃO TEM DE SER AS LINHAS 1, 2 E 3 DO ARQUIVO!
 sys.modules['aifc'] = types.ModuleType('aifc')
 
 
@@ -31,6 +31,8 @@ except Exception as e:
 
 # Dicionário de contingência mantido para compatibilidade
 nlp_modelos = {}
+
+# O RESTO DO CÓDIGO (obter_arquivo_usuario, rotas, etc.) CONTINUA IGUAL ABAIXO...
 
 
 def obter_arquivo_usuario(numero_whatsapp):
