@@ -9,7 +9,7 @@ from twilio.twiml.messaging_response import MessagingResponse
 from flask import Flask, request
 import sys
 import types
-# ESTA CORREÇÃO TEM DE SER AS LINHAS 1, 2 E 3 DO ARQUIVO ANTES DE QUALQUER IMPORT!
+# 1. ORDEM CRÍTICA: Emulação do módulo aifc antes de qualquer outro import
 sys.modules['aifc'] = types.ModuleType('aifc')
 
 
@@ -43,12 +43,13 @@ def obter_arquivo_usuario(numero_whatsapp):
 
 
 def analisar_tipo_fluxo(frase_lower):
+    # RECUPERADO: Lista internacional de ganhos/entradas
     ganhos = [
         "recebi", "ganhei", "faturei", "fatura", "salario", "salário", "entrada", "ordenado", "recebido", "credito",
         "ganado", "ingreso", "sueldo", "recibido",
         "earned", "received", "income", "salary", "deposit",
         "reçu", "gagné", "salaire", "facture",
-        "получил", "доход", "зарплата", "دخل", "استلمت", "راتb", "收到", "收入", "工资"
+        "получил", "доход", "зарплата", "دخل", "استlemت", "راتب", "收到", "收入", "工资"
     ]
     if any(g in frase_lower for g in ganhos):
         return "Entrada"
@@ -66,23 +67,21 @@ def extrair_valor_universal(frase):
 
 def detetar_idioma_e_processar(frase):
     frase_lower = frase.lower()
-    valor = extrair_valor_universal(frase)
+    valor = extrair_universal = extrair_valor_universal(frase)
     local = ""
 
-    # 1. Lista de palavras de tempo para limpar do final da frase
+    # RECUPERADO: Palavras de tempo multi-idioma
     palavras_tempo = ["hoje", "ontem", "agora",
                       "já", "hoy", "ayer", "today", "yesterday"]
 
-    # 2. Tenta extrair o local pela última palavra válida
     palavras = frase.split()
     if palavras:
-        # Se a última palavra for de tempo, tenta pegar a penúltima!
         if palavras[-1].lower().strip(".,!€$") in palavras_tempo and len(palavras) > 1:
             local = palavras[-2].strip(".,!€$")
         else:
             local = palavras[-1].strip(".,!€$")
 
-    # 3. Se houver marcas conhecidas na frase, elas têm prioridade absoluta
+    # RECUPERADO: Marcas e redes internacionais
     for marca in ["mercadona", "pingo doce", "continente", "mcdonalds", "uber", "carrefour", "auchan", "lidl", "yandex"]:
         if marca in frase_lower:
             local = marca.capitalize()
@@ -91,25 +90,26 @@ def detetar_idioma_e_processar(frase):
     tipo = analisar_tipo_fluxo(frase_lower)
     categoria = "Outros Gastos"
 
+    # RECUPERADO: Categorização internacional de contas fixas
     if any(k in frase_lower for k in ["renda", "aluguel", "aluguer", "luz", "agua", "água", "internet", "alquiler", "rent", "loyer"]):
         categoria = "🏠 Contas Fixas"
         if not local or local.lower() in palavras_tempo or local == "":
             local = "Contas Fixas"
 
     if tipo == "Entrada":
-        if category := "🏠 Contas Fixas":
-            pass
-        else:
-            condicao_salario = ["salario", "salário", "ordenado",
-                                "recebi", "sueldo", "salary", "salaire", "зарплата"]
-            categoria = "💰 Ordenado/Ganhos" if any(
-                k in frase_lower for k in condicao_salario) else "📈 Faturação/Extras"
+        condicao_salario = ["salario", "salário", "ordenado",
+                            "recebi", "sueldo", "salary", "salaire", "зарплата"]
+        categoria = "💰 Ordenado/Ganhos" if any(
+            k in frase_lower for k in condicao_salario) else "📈 Faturação/Extras"
     else:
         if categoria == "Outros Gastos":
+            # RECUPERADO: Supermercados globais
             if any(k in frase_lower for k in ["mercadona", "continente", "pingo", "lidl", "carrefour", "supermarche", "grocery", "groceries", "продукты"]):
                 categoria = "🛒 Supermercado/Casa"
+            # RECUPERADO: Alimentação global
             elif any(k in frase_lower for k in ["mcdonalds", "restaurante", "restaurant", "cafe", "café", "bar", "ресторан"]):
                 categoria = "🍕 Lazer/Alimentação Fora"
+            # RECUPERADO: Transportes globais
             elif any(k in frase_lower for k in ["uber", "taxi", "galp", "bp", "gasolina", "combustivel", "fuel", "essence", "такси"]):
                 categoria = "🚗 Transporte/Combustível"
 
@@ -117,38 +117,29 @@ def detetar_idioma_e_processar(frase):
 
 
 def transcrever_audio_whatsapp(url_audio):
-    # CORREÇÃO: Removido o '/tmp/' para salvar localmente sem bloqueios do Render
     arquivo_ogg = "audio_temp.ogg"
     arquivo_wav = "audio_temp.wav"
     try:
-        # 1. Força o static-ffmpeg a mapear os caminhos no sistema
-        import static_ffmpeg
-        static_ffmpeg.add_paths()
-
-        # 2. DIZ EXPLICITAMENTE À PYDUB ONDE ESTÃO OS EXECUTÁVEIS
+        # Injeção dinâmica de caminhos do ambiente nativo Linux do Render para a Pydub
         import shutil
         ffmpeg_path = shutil.which("ffmpeg")
         ffprobe_path = shutil.which("ffprobe")
-
         if ffmpeg_path:
             AudioSegment.converter = ffmpeg_path
             AudioSegment.ffmpeg = ffmpeg_path
         if ffprobe_path:
             AudioSegment.ffprobe = ffprobe_path
 
-        print(f"🚀 Caminho do FFmpeg injetado na Pydub: {ffmpeg_path}")
-
-        # 3. Faz o download do áudio vindo da Twilio
+        print(f"📥 Baixando áudio da Twilio...")
         resposta = requests.get(url_audio)
-
         with open(arquivo_ogg, "wb") as f:
             f.write(resposta.content)
 
-        # 4. Converte OGG para WAV
-        audio = AudioSegment.from_ogg(arquivo_ogg)
+        print("🔄 Convertendo OGG para WAV localmente...")
+        audio = AudioSegment.from_file(arquivo_ogg, format="ogg")
         audio.export(arquivo_wav, format="wav")
 
-        # 5. Reconhecimento de Voz
+        print("🎙️ Enviando para o Google Speech Recognition...")
         reconhecedor = sr.Recognizer()
         with sr.AudioFile(arquivo_wav) as fonte:
             dados_audio = reconhecedor.record(fonte)
@@ -158,11 +149,10 @@ def transcrever_audio_whatsapp(url_audio):
         return texto_transcrito
 
     except Exception as e:
-        print(f"❌ Erro de processamento de áudio na nuvem: {e}")
+        print(f"❌ Erro no processamento de áudio: {e}")
         return ""
 
     finally:
-        # Limpeza de arquivos temporários garantida usando o bloco finally
         if os.path.exists(arquivo_ogg):
             os.remove(arquivo_ogg)
         if os.path.exists(arquivo_wav):
@@ -180,13 +170,12 @@ def whatsapp_reply():
     resposta_twilio = MessagingResponse()
     msg = resposta_twilio.message()
 
-    # Se houver qualquer mídia, capturamos o link e mandamos para a transcrição
     if num_midias > 0:
         url_audio = request.values.get("MediaUrl0", "")
         if url_audio:
-            print(f"📥 Mídia detectada! Baixando áudio de: {url_audio}")
+            print(f"📥 Áudio recebido da Twilio! URL: {url_audio}")
             texto_recebido = transcrever_audio_whatsapp(url_audio)
-            print(f"🎙️ Áudio Transcrito com Sucesso: '{texto_recebido}'")
+            print(f"🎙️ Resultado final da transcrição: '{texto_recebido}'")
 
     if texto_recebido:
         tipo, v, l, c = detetar_idioma_e_processar(texto_recebido)
@@ -207,8 +196,7 @@ def whatsapp_reply():
                 f"⚠️ *Vio:* Consegui ouvir: \"{texto_recebido}\", mas não encontrei o valor ou o local claramente.")
     else:
         if num_midias > 0:
-            msg.body(
-                "⚠️ *Vio:* Recebi o teu arquivo de voz, mas não consegui extrair o texto dele. Por favor, fala de forma mais clara ou pausada.")
+            msg.body("⚠️ *Vio:* Recebi o teu arquivo de voz, mas não consegui extrair o texto dele. Por favor, fala de forma mais clara ou pausada.")
 
     return str(resposta_twilio)
 
