@@ -176,12 +176,13 @@ def whatsapp_reply():
     resposta_twilio = MessagingResponse()
     msg = resposta_twilio.message()
 
+    # CORREÇÃO AQUI: Se houver qualquer mídia, capturamos o link e mandamos para a transcrição
     if num_midias > 0:
-        tipo_midia = request.values.get("MediaContentType0", "")
-        if "audio" in tipo_midia or "ogg" in tipo_midia:
-            url_audio = request.values.get("MediaUrl0", "")
+        url_audio = request.values.get("MediaUrl0", "")
+        if url_audio:
+            print(f"📥 Mídia detectada! Baixando áudio de: {url_audio}")
             texto_recebido = transcrever_audio_whatsapp(url_audio)
-            print(f"🎙️ Áudio Transcrito: '{texto_recebido}'")
+            print(f"🎙️ Áudio Transcrito com Sucesso: '{texto_recebido}'")
 
     if texto_recebido:
         tipo, v, l, c = detetar_idioma_e_processar(texto_recebido)
@@ -203,7 +204,7 @@ def whatsapp_reply():
     else:
         if num_midias > 0:
             msg.body(
-                "⚠️ *Vio:* Não consegui processar o arquivo de voz. Por favor, tente falar de forma pausada.")
+                "⚠️ *Vio:* Recebi o teu arquivo de voz, mas não consegui extrair o texto dele. Por favor, fala de forma mais clara ou pausada.")
 
     return str(resposta_twilio)
 

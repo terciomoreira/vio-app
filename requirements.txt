@@ -1,8 +1,7 @@
-Flask==3.0.2
-twilio==9.0.4
-requests==2.31.0
+Flask
+twilio
+requests
+pydub
 SpeechRecognition
-pydub==0.25.1
-spacy>=3.7.4 --only-binary=:all:
-gunicorn==21.2.0
-static-ffmpeg==2.5
+spacy
+static-ffmpeg
