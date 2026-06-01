@@ -117,71 +117,73 @@ def detetar_idioma_e_processar(frase):
 
 
 def transcrever_audio_whatsapp(url_audio):
-    arquivo_ogg = "audio_temp.ogg"
-    arquivo_wav = "audio_temp.wav"
+    # Usar caminhos locais bem definidos
+    arquivo_ogg = os.path.join(os.getcwd(), "audio_temp.ogg")
+    arquivo_wav = os.path.join(os.getcwd(), "audio_temp.wav")
+
     try:
-        # CORREÇÃO LOCAL: Aponta para os binários baixados pelo build.sh na raiz do projeto
-        diretorio_atual = os.path.dirname(os.path.abspath(__file__))
+        # Forçar caminhos absolutos para os binários baixados pelo build.sh
+        diretorio_atual = os.getcwd()
         ffmpeg_local = os.path.join(diretorio_atual, "ffmpeg")
         ffprobe_local = os.path.join(diretorio_atual, "ffprobe")
 
-        # Se os binários locais existirem, injeta-os diretamente na Pydub
+        # Injetar diretamente nas variáveis globais do pydub
         if os.path.exists(ffmpeg_local):
-            AudioSegment.converter = ffmpeg_local
-            AudioSegment.ffmpeg = ffmpeg_local
-            print(f"✅ FFmpeg local detetado em: {ffmpeg_local}")
-        if os.path.exists(ffprobe_local):
-            AudioSegment.ffprobe = ffprobe_local
+            import pydub
+            pydub.AudioSegment.converter = ffmpeg_local
+            pydub.AudioSegment.ffmpeg = ffmpeg_local
+            pydub.AudioSegment.ffprobe = ffprobe_local
+            print(f"✅ FFmpeg Local Forçado e Vinculado em: {ffmpeg_local}")
 
-        print(f"📥 Baixando áudio da Twilio...")
+        print("📥 Baixando áudio da Twilio...")
         resposta = requests.get(url_audio)
         with open(arquivo_ogg, "wb") as f:
             f.write(resposta.content)
 
-        print("🔄 Convertendo OGG para WAV localmente...")
+        print("🔄 Convertendo OGG para WAV...")
+        from pydub import AudioSegment
         audio = AudioSegment.from_file(arquivo_ogg, format="ogg")
+
+        # Exportar garantindo formato compatível (Mono, 16000Hz) para o Google Recognition
+        audio = audio.set_frame_rate(16000).set_channels(1)
         audio.export(arquivo_wav, format="wav")
 
-        print("🎙️ Iniciando reconhecimento de voz multi-idioma...")
+        print("🎙️ Processando Reconhecimento Multi-idioma...")
         reconhecedor = sr.Recognizer()
 
-        # Ajuste de ruído dinâmico para melhorar a leitura de sotaques em áudios de rua/WhatsApp
-        reconhecedor.dynamic_energy_threshold = True
+        # Desativar limite dinâmico que costuma falhar no áudio comprimido do WhatsApp
+        reconhecedor.dynamic_energy_threshold = False
+        reconhecedor.energy_threshold = 300
 
         with sr.AudioFile(arquivo_wav) as fonte:
-            # Ajusta o microfone virtual para o ruído de fundo do áudio recebido
-            reconhecedor.adjust_for_ambient_noise(fonte, duration=0.5)
+            # Tempo menor de calibração para não apagar o início da fala
+            reconhecedor.adjust_for_ambient_noise(fonte, duration=0.2)
             dados_audio = reconhecedor.record(fonte)
 
-        # Lista de idiomas/sotaques suportados em ordem de probabilidade do teu público
-        # pt-PT (Portugal), pt-BR (Brasil), es-ES (Espanha), en-US (Inglês), fr-FR (França)
-        idiomas_suportados = ["pt-PT", "pt-BR", "es-ES", "en-US", "fr-FR"]
+        # Ordem de tentativa baseada no teu público principal
+        idiomas_suportados = ["pt-PT", "pt-BR", "en-US", "es-ES"]
         texto_transcrito = ""
 
-        # Tentativa em cascata: testa os idiomas até conseguir uma tradução válida
         for idioma in idiomas_suportados:
             try:
-                print(f"🗣️ Tentando decifrar sotaque/idioma em: {idioma}...")
+                print(f"🗣️ Tentando idioma: {idioma}")
                 texto_transcrito = reconhecedor.recognize_google(
                     dados_audio, language=idioma)
-                if texto_transcrito.strip():
+                if texto_transcrito and texto_transcrito.strip():
                     print(
-                        f"🎯 Sucesso com o idioma [{idioma}]: '{texto_transcrito}'")
-                    break
-            except sr.UnknownValueError:
-                # O Google não entendeu neste idioma específico, pula para o próximo da lista
-                continue
-            except sr.RequestError:
-                # Falha de conexão com a API do Google, tenta o próximo por segurança
+                        f"🎯 Transcrição com sucesso [{idioma}]: {texto_transcrito}")
+                    return texto_transcrito
+            except Exception:
                 continue
 
         return texto_transcrito
 
     except Exception as e:
-        print(f"❌ Erro no processamento de áudio: {e}")
+        print(f"❌ Erro crítico no áudio: {e}")
         return ""
 
     finally:
+        # Garantir limpeza dos arquivos locais
         if os.path.exists(arquivo_ogg):
             os.remove(arquivo_ogg)
         if os.path.exists(arquivo_wav):
