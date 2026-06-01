@@ -5,3 +5,4 @@ SpeechRecognition
 pydub==0.25.1
 spacy>=3.7.4 --only-binary=:all:
 gunicorn==21.2.0
+static-ffmpeg==2.5

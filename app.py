@@ -118,6 +118,14 @@ def detetar_idioma_e_processar(frase):
 
 def transcrever_audio_whatsapp(url_audio):
     try:
+        # Força o carregamento do FFmpeg estático diretamente para o sistema operativo
+        try:
+            import static_ffmpeg
+            static_ffmpeg.add_paths()
+            print("🚀 FFmpeg Estático mapeado com sucesso!")
+        except Exception as fe:
+            print(f"⚠️ Aviso ao carregar FFmpeg estático: {fe}")
+
         resposta = requests.get(url_audio)
         arquivo_ogg = "/tmp/audio_temp.ogg"
         arquivo_wav = "/tmp/audio_temp.wav"
@@ -125,25 +133,26 @@ def transcrever_audio_whatsapp(url_audio):
         with open(arquivo_ogg, "wb") as f:
             f.write(resposta.content)
 
+        # Tenta converter o áudio
         audio = AudioSegment.from_ogg(arquivo_ogg)
         audio.export(arquivo_wav, format="wav")
 
         reconhecedor = sr.Recognizer()
         with sr.AudioFile(arquivo_wav) as fonte:
             dados_audio = reconhecedor.record(fonte)
-            texto_transcrito = reconhecedor.recognize_google(
-                dados_audio, language="pt-PT")
+            texto_transcrito = reconhecedor.recognize_google(dados_audio, language="pt-PT")
 
-        if os.path.exists(arquivo_ogg):
-            os.remove(arquivo_ogg)
-        if os.path.exists(arquivo_wav):
-            os.remove(arquivo_wav)
+        # Limpeza de arquivos temporários
+        if os.path.exists(arquivo_ogg): os.remove(arquivo_ogg)
+        if os.path.exists(arquivo_wav): os.remove(arquivo_wav)
 
         return texto_transcrito
     except Exception as e:
         print(f"❌ Erro de processamento de áudio na nuvem: {e}")
+        # Garante que limpa os arquivos mesmo se der erro
+        if os.path.exists(arquivo_ogg): os.remove(arquivo_ogg)
+        if os.path.exists(arquivo_wav): os.remove(arquivo_wav)
         return ""
-
 
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp_reply():
