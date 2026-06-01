@@ -6,3 +6,4 @@ SpeechRecognition
 spacy
 static-ffmpeg
 gunicorn
+google-generativeai

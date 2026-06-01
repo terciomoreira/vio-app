@@ -1,3 +1,4 @@
+import google.generativeai as genai
 import spacy
 from datetime import datetime
 from pydub import AudioSegment
@@ -117,73 +118,69 @@ def detetar_idioma_e_processar(frase):
 
 
 def transcrever_audio_whatsapp(url_audio):
-    # Usar caminhos locais bem definidos
+    # Definir caminhos locais absolutos na raiz do projeto
     arquivo_ogg = os.path.join(os.getcwd(), "audio_temp.ogg")
     arquivo_wav = os.path.join(os.getcwd(), "audio_temp.wav")
 
     try:
-        # Forçar caminhos absolutos para os binários baixados pelo build.sh
+        # Mapeamento do FFmpeg estático baixado pelo build.sh
         diretorio_atual = os.getcwd()
         ffmpeg_local = os.path.join(diretorio_atual, "ffmpeg")
         ffprobe_local = os.path.join(diretorio_atual, "ffprobe")
 
-        # Injetar diretamente nas variáveis globais do pydub
         if os.path.exists(ffmpeg_local):
             import pydub
             pydub.AudioSegment.converter = ffmpeg_local
             pydub.AudioSegment.ffmpeg = ffmpeg_local
             pydub.AudioSegment.ffprobe = ffprobe_local
-            print(f"✅ FFmpeg Local Forçado e Vinculado em: {ffmpeg_local}")
+            print(f"✅ FFmpeg Local Vinculado: {ffmpeg_local}")
 
+        # Baixar o áudio OGG vindo da Twilio
         print("📥 Baixando áudio da Twilio...")
         resposta = requests.get(url_audio)
         with open(arquivo_ogg, "wb") as f:
             f.write(resposta.content)
 
+        # Converter para WAV de alta compatibilidade (16000Hz, Mono)
         print("🔄 Convertendo OGG para WAV...")
         from pydub import AudioSegment
         audio = AudioSegment.from_file(arquivo_ogg, format="ogg")
-
-        # Exportar garantindo formato compatível (Mono, 16000Hz) para o Google Recognition
         audio = audio.set_frame_rate(16000).set_channels(1)
         audio.export(arquivo_wav, format="wav")
 
-        print("🎙️ Processando Reconhecimento Multi-idioma...")
-        reconhecedor = sr.Recognizer()
+        print("🎙️ Enviando áudio diretamente para a API do Gemini...")
 
-        # Desativar limite dinâmico que costuma falhar no áudio comprimido do WhatsApp
-        reconhecedor.dynamic_energy_threshold = False
-        reconhecedor.energy_threshold = 300
+        # Faz o upload temporário do arquivo WAV para a API do Gemini
+        audio_file_gemini = genai.upload_file(path=arquivo_wav)
 
-        with sr.AudioFile(arquivo_wav) as fonte:
-            # Tempo menor de calibração para não apagar o início da fala
-            reconhecedor.adjust_for_ambient_noise(fonte, duration=0.2)
-            dados_audio = reconhecedor.record(fonte)
+        # Instanciar o modelo flash
+        modelo = genai.GenerativeModel("gemini-1.5-flash")
 
-        # Ordem de tentativa baseada no teu público principal
-        idiomas_suportados = ["pt-PT", "pt-BR", "en-US", "es-ES"]
-        texto_transcrito = ""
+        # Comando cirúrgico para transcrição poliglota pura
+        resposta_gemini = modelo.generate_content([
+            "Transcreva este arquivo de áudio exatamente como ele foi falado. "
+            "Não adicione nenhuma introdução, explicação ou comentário, apenas retorne o texto transcrito puro. "
+            "Se o utilizador falar com sotaque brasileiro, português, ou noutro idioma como inglês/espanhol, transcreva fielmente no idioma nativo que ouviu.",
+            audio_file_gemini
+        ])
 
-        for idioma in idiomas_suportados:
-            try:
-                print(f"🗣️ Tentando idioma: {idioma}")
-                texto_transcrito = reconhecedor.recognize_google(
-                    dados_audio, language=idioma)
-                if texto_transcrito and texto_transcrito.strip():
-                    print(
-                        f"🎯 Transcrição com sucesso [{idioma}]: {texto_transcrito}")
-                    return texto_transcrito
-            except Exception:
-                continue
+        texto_transcrito = resposta_gemini.text.strip()
+        print(f"🎯 Transcrição Gemini concluída: '{texto_transcrito}'")
+
+        # Apagar o arquivo temporário da nuvem da Google imediatamente após uso
+        try:
+            genai.delete_file(audio_file_gemini.name)
+        except Exception as e_del:
+            print(f"⚠️ Aviso ao limpar arquivo na nuvem Gemini: {e_del}")
 
         return texto_transcrito
 
     except Exception as e:
-        print(f"❌ Erro crítico no áudio: {e}")
+        print(f"❌ Erro crítico no motor Gemini de áudio: {e}")
         return ""
 
     finally:
-        # Garantir limpeza dos arquivos locais
+        # Limpeza rigorosa no disco do Render
         if os.path.exists(arquivo_ogg):
             os.remove(arquivo_ogg)
         if os.path.exists(arquivo_wav):
