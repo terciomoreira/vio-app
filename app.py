@@ -1,19 +1,22 @@
 from google.genai import types as genai_types
 from google import genai
-import os
+from twilio.twiml.messaging_response import MessagingResponse
+from flask import Flask, request
+import spacy
+import requests
+from datetime import datetime
 import re
+import os
 import sys
 import types
-from datetime import datetime
-import requests
-import spacy
-from flask import Flask, request
-from twilio.twiml.messaging_response import MessagingResponse
-
-# 1. ORDEM CRÍTICA: Emulação do módulo aifc antes de qualquer outro import
+# ==============================================================================
+# 🚨 ORDEM CRÍTICA REVOLUCIONÁRIA: ESTA EMULAÇÃO TEM DE SER A LINHA 1, 2 E 3!
+# NÃO PODE EXISTIR NENHUM IMPORT DE IA OU BIBLIOTECA ANTES DESTO!
+# ==============================================================================
 sys.modules['aifc'] = types.ModuleType('aifc')
 
-# Importa o NOVO SDK oficial da Google
+
+# Agora sim, os imports da Google acontecem em segurança com o aifc já emulado
 
 # Inicializa o Flask
 app = Flask(__name__)
@@ -111,6 +114,7 @@ def detetar_idioma_e_processar(frase):
 
 def transcrever_audio_whatsapp(url_audio):
     if not client:
+        print("❌ Cliente Gemini não inicializado!")
         return ""
     arquivo_ogg = os.path.join(os.getcwd(), "audio_temp.ogg")
     arquivo_wav = os.path.join(os.getcwd(), "audio_temp.wav")
@@ -122,27 +126,31 @@ def transcrever_audio_whatsapp(url_audio):
             import pydub
             pydub.AudioSegment.converter = ffmpeg_local
 
+        print("📥 Fazendo download do áudio da Twilio...")
         resposta = requests.get(url_audio)
         with open(arquivo_ogg, "wb") as f:
             f.write(resposta.content)
 
+        print("🔄 Convertendo arquivo OGG para WAV...")
         from pydub import AudioSegment
         audio = AudioSegment.from_file(arquivo_ogg, format="ogg")
         audio = audio.set_frame_rate(16000).set_channels(1)
         audio.export(arquivo_wav, format="wav")
 
-        # Upload e geração com o NOVO SDK oficial da Google
+        print("🎙️ Enviando áudio para o NOVO SDK do Gemini...")
         audio_file_gemini = client.files.upload(file=arquivo_wav)
 
         resposta_gemini = client.models.generate_content(
             model="gemini-1.5-flash",
             contents=[
-                "Transcreva este arquivo de áudio exatamente como ele foi falado. Não adicione nenhuma introdução.",
+                "Transcreva este arquivo de áudio exatamente como ele foi falado. "
+                "Retorne exclusivamente o texto transcrito puro, sem introduções ou explicações.",
                 audio_file_gemini
             ]
         )
 
         texto_transcrito = resposta_gemini.text.strip()
+        print(f"🎯 Transcrição realizada com sucesso: '{texto_transcrito}'")
 
         try:
             client.files.delete(name=audio_file_gemini.name)
@@ -165,10 +173,12 @@ def escanear_recibo_gemini(url_imagem):
         return ""
     arquivo_img = os.path.join(os.getcwd(), "temp_recibo.jpg")
     try:
+        print("📥 Fazendo download da imagem do recibo...")
         resposta = requests.get(url_imagem)
         with open(arquivo_img, "wb") as f:
             f.write(resposta.content)
 
+        print("🧾 Enviando imagem para análise visual do Gemini...")
         foto_gemini = client.files.upload(file=arquivo_img)
 
         prompt = (
@@ -215,10 +225,12 @@ def whatsapp_reply():
         url_midia = request.values.get("MediaUrl0", "")
         if url_midia:
             if "audio" in tipo_midia or "ogg" in url_midia:
-                print(f"📥 Processando Áudio... URL: {url_midia}")
+                print(
+                    f"📥 Processando Áudio... URL: {url_midia} | Tipo: {tipo_midia}")
                 texto_recebido = transcrever_audio_whatsapp(url_midia)
             elif "image" in tipo_midia:
-                print(f"📥 Processando Imagem... URL: {url_midia}")
+                print(
+                    f"📥 Processando Imagem... URL: {url_midia} | Tipo: {tipo_midia}")
                 texto_recebido = escanear_recibo_gemini(url_midia)
 
     if texto_recebido:
