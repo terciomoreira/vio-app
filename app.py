@@ -1,14 +1,15 @@
-from flask import Flask, request
-from twilio.twiml.messaging_response import MessagingResponse
-import os
-import re
-import requests
-import speech_recognition as sr
-from pydub import AudioSegment
-from datetime import datetime
 import spacy
+from datetime import datetime
+from pydub import AudioSegment
+import speech_recognition as sr
+import requests
+import re
+import os
+from twilio.twiml.messaging_response import MessagingResponse
+from flask import Flask, request
 import sys
 import types
+# ESTA CORREÇÃO TEM DE SER AS LINHAS 1, 2 E 3 DO ARQUIVO ANTES DE QUALQUER IMPORT!
 sys.modules['aifc'] = types.ModuleType('aifc')
 
 
@@ -96,7 +97,9 @@ def detetar_idioma_e_processar(frase):
             local = "Contas Fixas"
 
     if tipo == "Entrada":
-        if categoria != "🏠 Contas Fixas":
+        if category := "🏠 Contas Fixas":
+            pass
+        else:
             condicao_salario = ["salario", "salário", "ordenado",
                                 "recebi", "sueldo", "salary", "salaire", "зарплата"]
             categoria = "💰 Ordenado/Ganhos" if any(
@@ -114,8 +117,9 @@ def detetar_idioma_e_processar(frase):
 
 
 def transcrever_audio_whatsapp(url_audio):
-    arquivo_ogg = "/tmp/audio_temp.ogg"
-    arquivo_wav = "/tmp/audio_temp.wav"
+    # CORREÇÃO: Removido o '/tmp/' para salvar localmente sem bloqueios do Render
+    arquivo_ogg = "audio_temp.ogg"
+    arquivo_wav = "audio_temp.wav"
     try:
         # 1. Força o static-ffmpeg a mapear os caminhos no sistema
         import static_ffmpeg
@@ -176,7 +180,7 @@ def whatsapp_reply():
     resposta_twilio = MessagingResponse()
     msg = resposta_twilio.message()
 
-    # CORREÇÃO AQUI: Se houver qualquer mídia, capturamos o link e mandamos para a transcrição
+    # Se houver qualquer mídia, capturamos o link e mandamos para a transcrição
     if num_midias > 0:
         url_audio = request.values.get("MediaUrl0", "")
         if url_audio:
