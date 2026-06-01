@@ -1,9 +1,10 @@
 services:
   - type: web
-    name: vio-app
-    runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn vio_app:app
+    name: vio-app-final
+    runtime: buildpacks
     envVars:
       - key: PYTHON_VERSION
-        value: 3.10.11
+        value: 3.11.5
+    buildpacks:
+      - url: heroku/python
+      - url: https://github.com/heroku/heroku-buildpack-ffmpeg-latest.git
