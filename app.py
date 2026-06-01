@@ -1,12 +1,12 @@
-from flask import Flask, request
-from twilio.twiml.messaging_response import MessagingResponse
-import os
-import re
-import requests
-import speech_recognition as sr
-from pydub import AudioSegment
-from datetime import datetime
 import spacy
+from datetime import datetime
+from pydub import AudioSegment
+import speech_recognition as sr
+import requests
+import re
+import os
+from twilio.twiml.messaging_response import MessagingResponse
+from flask import Flask, request
 import sys
 import types
 # ESTA CORREÇÃO TEM DE SER AS LINHAS 1, 2 E 3 DO ARQUIVO!
@@ -32,7 +32,7 @@ except Exception as e:
 # Dicionário de contingência mantido para compatibilidade
 nlp_modelos = {}
 
-# O RESTO DO CÓDIGO (obter_arquivo_usuario, rotas, etc.) CONTINUA IGUAL ABAIXO...
+# O RESTO DO  CÓDIGO (obter_arquivo_usuario, rotas, etc.) CONTINUA IGUAL ABAIXO...
 
 
 def obter_arquivo_usuario(numero_whatsapp):
@@ -71,10 +71,20 @@ def detetar_idioma_e_processar(frase):
     valor = extrair_valor_universal(frase)
     local = ""
 
+    # 1. Lista de palavras de tempo para limpar do final da frase
+    palavras_tempo = ["hoje", "ontem", "agora",
+                      "já", "hoy", "ayer", "today", "yesterday"]
+
+    # 2. Tenta extrair o local pela última palavra válida
     palavras = frase.split()
     if palavras:
-        local = palavras[-1].strip(".,!€$")
+        # Se a última palavra for de tempo, tenta pegar a penúltima!
+        if palavras[-1].lower().strip(".,!€$") in palavras_tempo and len(palavras) > 1:
+            local = palavras[-2].strip(".,!€$")
+        else:
+            local = palavras[-1].strip(".,!€$")
 
+    # 3. Se houver marcas conhecidas na frase, elas têm prioridade absoluta
     for marca in ["mercadona", "pingo doce", "continente", "mcdonalds", "uber", "carrefour", "auchan", "lidl", "yandex"]:
         if marca in frase_lower:
             local = marca.capitalize()
@@ -85,7 +95,7 @@ def detetar_idioma_e_processar(frase):
 
     if any(k in frase_lower for k in ["renda", "aluguel", "aluguer", "luz", "agua", "água", "internet", "alquiler", "rent", "loyer"]):
         categoria = "🏠 Contas Fixas"
-        if not local or local.lower() in ["hoje", "hoy", "today", ""]:
+        if not local or local.lower() in palavras_tempo or local == "":
             local = "Contas Fixas"
 
     if tipo == "Entrada":
