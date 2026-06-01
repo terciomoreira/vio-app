@@ -1,21 +1,27 @@
-import google.generativeai as genai
-import spacy
-from datetime import datetime
-from pydub import AudioSegment
-import speech_recognition as sr
-import requests
-import re
 import os
-from twilio.twiml.messaging_response import MessagingResponse
-from flask import Flask, request
+import re
 import sys
 import types
+from datetime import datetime
+import google.generativeai as genai
+import requests
+import spacy
+from flask import Flask, request
+from twilio.twiml.messaging_response import MessagingResponse
+
 # 1. ORDEM CRÍTICA: Emulação do módulo aifc antes de qualquer outro import
 sys.modules['aifc'] = types.ModuleType('aifc')
 
-
 # Inicializa o Flask
 app = Flask(__name__)
+
+# Configuração Global da API do Gemini (Lê o VALUE que já tens no Render!)
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    print("🚀 API do Gemini vinculada com sucesso a partir do Render!")
+else:
+    print("⚠️ AVISO: GEMINI_API_KEY não detetada nas variáveis!")
 
 # Garante o download e carregamento do modelo de IA em Português
 try:
@@ -44,7 +50,6 @@ def obter_arquivo_usuario(numero_whatsapp):
 
 
 def analisar_tipo_fluxo(frase_lower):
-    # RECUPERADO: Lista internacional de ganhos/entradas
     ganhos = [
         "recebi", "ganhei", "faturei", "fatura", "salario", "salário", "entrada", "ordenado", "recebido", "credito",
         "ganado", "ingreso", "sueldo", "recibido",
@@ -68,10 +73,9 @@ def extrair_valor_universal(frase):
 
 def detetar_idioma_e_processar(frase):
     frase_lower = frase.lower()
-    valor = extrair_universal = extrair_valor_universal(frase)
+    valor = extrair_valor_universal(frase)
     local = ""
 
-    # RECUPERADO: Palavras de tempo multi-idioma
     palavras_tempo = ["hoje", "ontem", "agora",
                       "já", "hoy", "ayer", "today", "yesterday"]
 
@@ -82,7 +86,6 @@ def detetar_idioma_e_processar(frase):
         else:
             local = palavras[-1].strip(".,!€$")
 
-    # RECUPERADO: Marcas e redes internacionais
     for marca in ["mercadona", "pingo doce", "continente", "mcdonalds", "uber", "carrefour", "auchan", "lidl", "yandex"]:
         if marca in frase_lower:
             local = marca.capitalize()
@@ -91,7 +94,6 @@ def detetar_idioma_e_processar(frase):
     tipo = analisar_tipo_fluxo(frase_lower)
     categoria = "Outros Gastos"
 
-    # RECUPERADO: Categorização internacional de contas fixas
     if any(k in frase_lower for k in ["renda", "aluguel", "aluguer", "luz", "agua", "água", "internet", "alquiler", "rent", "loyer"]):
         categoria = "🏠 Contas Fixas"
         if not local or local.lower() in palavras_tempo or local == "":
@@ -104,13 +106,10 @@ def detetar_idioma_e_processar(frase):
             k in frase_lower for k in condicao_salario) else "📈 Faturação/Extras"
     else:
         if categoria == "Outros Gastos":
-            # RECUPERADO: Supermercados globais
             if any(k in frase_lower for k in ["mercadona", "continente", "pingo", "lidl", "carrefour", "supermarche", "grocery", "groceries", "продукты"]):
                 categoria = "🛒 Supermercado/Casa"
-            # RECUPERADO: Alimentação global
             elif any(k in frase_lower for k in ["mcdonalds", "restaurante", "restaurant", "cafe", "café", "bar", "ресторан"]):
                 categoria = "🍕 Lazer/Alimentação Fora"
-            # RECUPERADO: Transportes globais
             elif any(k in frase_lower for k in ["uber", "taxi", "galp", "bp", "gasolina", "combustivel", "fuel", "essence", "такси"]):
                 categoria = "🚗 Transporte/Combustível"
 
@@ -118,12 +117,10 @@ def detetar_idioma_e_processar(frase):
 
 
 def transcrever_audio_whatsapp(url_audio):
-    # Definir caminhos locais absolutos na raiz do projeto
     arquivo_ogg = os.path.join(os.getcwd(), "audio_temp.ogg")
     arquivo_wav = os.path.join(os.getcwd(), "audio_temp.wav")
 
     try:
-        # Mapeamento do FFmpeg estático baixado pelo build.sh
         diretorio_atual = os.getcwd()
         ffmpeg_local = os.path.join(diretorio_atual, "ffmpeg")
         ffprobe_local = os.path.join(diretorio_atual, "ffprobe")
@@ -133,58 +130,81 @@ def transcrever_audio_whatsapp(url_audio):
             pydub.AudioSegment.converter = ffmpeg_local
             pydub.AudioSegment.ffmpeg = ffmpeg_local
             pydub.AudioSegment.ffprobe = ffprobe_local
-            print(f"✅ FFmpeg Local Vinculado: {ffmpeg_local}")
 
-        # Baixar o áudio OGG vindo da Twilio
-        print("📥 Baixando áudio da Twilio...")
         resposta = requests.get(url_audio)
         with open(arquivo_ogg, "wb") as f:
             f.write(resposta.content)
 
-        # Converter para WAV de alta compatibilidade (16000Hz, Mono)
-        print("🔄 Convertendo OGG para WAV...")
         from pydub import AudioSegment
         audio = AudioSegment.from_file(arquivo_ogg, format="ogg")
         audio = audio.set_frame_rate(16000).set_channels(1)
         audio.export(arquivo_wav, format="wav")
 
-        print("🎙️ Enviando áudio diretamente para a API do Gemini...")
-
-        # Faz o upload temporário do arquivo WAV para a API do Gemini
-        audio_file_gemini = genai.upload_file(path=arquivo_wav)
-
-        # Instanciar o modelo flash
+        # Upload para o Gemini usando a API Key global
+        audio_file_gemini = genai.upload_file(
+            path=arquivo_wav, mime_type="audio/wav")
         modelo = genai.GenerativeModel("gemini-1.5-flash")
 
-        # Comando cirúrgico para transcrição poliglota pura
         resposta_gemini = modelo.generate_content([
             "Transcreva este arquivo de áudio exatamente como ele foi falado. "
-            "Não adicione nenhuma introdução, explicação ou comentário, apenas retorne o texto transcrito puro. "
-            "Se o utilizador falar com sotaque brasileiro, português, ou noutro idioma como inglês/espanhol, transcreva fielmente no idioma nativo que ouviu.",
+            "Não adicione nenhuma introdução, explicação ou comentário, apenas retorne o texto transcrito puro.",
             audio_file_gemini
         ])
 
         texto_transcrito = resposta_gemini.text.strip()
-        print(f"🎯 Transcrição Gemini concluída: '{texto_transcrito}'")
 
-        # Apagar o arquivo temporário da nuvem da Google imediatamente após uso
         try:
             genai.delete_file(audio_file_gemini.name)
-        except Exception as e_del:
-            print(f"⚠️ Aviso ao limpar arquivo na nuvem Gemini: {e_del}")
+        except Exception:
+            pass
 
         return texto_transcrito
 
     except Exception as e:
         print(f"❌ Erro crítico no motor Gemini de áudio: {e}")
         return ""
-
     finally:
-        # Limpeza rigorosa no disco do Render
         if os.path.exists(arquivo_ogg):
             os.remove(arquivo_ogg)
         if os.path.exists(arquivo_wav):
             os.remove(arquivo_wav)
+
+
+def escanear_recibo_gemini(url_imagem):
+    """Lê imagens de faturas/recibos usando Visão Computacional do Gemini"""
+    arquivo_img = os.path.join(os.getcwd(), "temp_recibo.jpg")
+    try:
+        resposta = requests.get(url_imagem)
+        with open(arquivo_img, "wb") as f:
+            f.write(resposta.content)
+
+        foto_gemini = genai.upload_file(
+            path=arquivo_img, mime_type="image/jpeg")
+        modelo = genai.GenerativeModel("gemini-1.5-flash")
+
+        prompt = (
+            "Analise este recibo, cupom fiscal ou nota de compra. Extraia o valor total gasto e o nome do estabelecimento local. "
+            "Formate a resposta estritamente em uma única linha no formato: 'Gastei VALOR no LOCAL'. "
+            "Exemplo de saída: Gastei 24.50 no Continente. Não escreva mais nada além disso."
+        )
+
+        resposta_gemini = modelo.generate_content([prompt, foto_gemini])
+        resultado = resposta_gemini.text.strip()
+        print(f"🎯 Scanner Gemini concluiu leitura da nota: '{resultado}'")
+
+        try:
+            genai.delete_file(foto_gemini.name)
+        except Exception:
+            pass
+
+        return resultado
+
+    except Exception as e:
+        print(f"❌ Erro ao escanear nota fiscal: {e}")
+        return ""
+    finally:
+        if os.path.exists(arquivo_img):
+            os.remove(arquivo_img)
 
 
 @app.route("/whatsapp", methods=["POST"])
@@ -194,17 +214,26 @@ def whatsapp_reply():
 
     texto_recebido = request.values.get("Body", "").strip()
     num_midias = int(request.values.get("NumMedia", 0))
+    # Deteta o formato real enviado pela Twilio
+    tipo_midia = request.values.get("MediaContentType0", "")
 
     resposta_twilio = MessagingResponse()
     msg = resposta_twilio.message()
 
+    # Fluxo de Mídia Interativo
     if num_midias > 0:
-        url_audio = request.values.get("MediaUrl0", "")
-        if url_audio:
-            print(f"📥 Áudio recebido da Twilio! URL: {url_audio}")
-            texto_recebido = transcrever_audio_whatsapp(url_audio)
-            print(f"🎙️ Resultado final da transcrição: '{texto_recebido}'")
+        url_midia = request.values.get("MediaUrl0", "")
+        if url_midia:
+            # Se for áudio
+            if "audio" in tipo_midia or "ogg" in url_midia:
+                print(f"📥 Áudio recebido! URL: {url_midia}")
+                texto_recebido = transcrever_audio_whatsapp(url_midia)
+            # Se for uma imagem/foto do recibo
+            elif "image" in tipo_midia:
+                print(f"📥 Foto de Recibo recebida! URL: {url_midia}")
+                texto_recebido = escanear_recibo_gemini(url_midia)
 
+    # Processamento e gravação dos dados no CSV
     if texto_recebido:
         tipo, v, l, c = detetar_idioma_e_processar(texto_recebido)
 
@@ -221,10 +250,15 @@ def whatsapp_reply():
                     f"✅ *Vio:* Despesa registrada! Transcrito: *\"{texto_recebido}\"* -> *{l}* em *({c})*.")
         else:
             msg.body(
-                f"⚠️ *Vio:* Consegui ouvir: \"{texto_recebido}\", mas não encontrei o valor ou o local claramente.")
+                f"⚠️ *Vio:* Consegui processar a mensagem: \"{texto_recebido}\", mas não encontrei o valor ou o local claramente.")
     else:
         if num_midias > 0:
-            msg.body("⚠️ *Vio:* Recebi o teu arquivo de voz, mas não consegui extrair o texto dele. Por favor, fala de forma mais clara ou pausada.")
+            if "image" in tipo_midia:
+                msg.body(
+                    "⚠️ *Vio:* Não consegui ler esta foto. Garante que o recibo está bem focado e com o valor visível.")
+            else:
+                msg.body(
+                    "⚠️ *Vio:* Recebi o teu arquivo de voz, mas não consegui extrair o texto dele. Por favor, fala de forma mais clara ou pausada.")
 
     return str(resposta_twilio)
 
