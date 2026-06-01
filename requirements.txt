@@ -5,3 +5,4 @@ pydub
 SpeechRecognition
 spacy
 static-ffmpeg
+gunicorn
