@@ -120,15 +120,18 @@ def transcrever_audio_whatsapp(url_audio):
     arquivo_ogg = "audio_temp.ogg"
     arquivo_wav = "audio_temp.wav"
     try:
-        # Injeção dinâmica de caminhos do ambiente nativo Linux do Render para a Pydub
-        import shutil
-        ffmpeg_path = shutil.which("ffmpeg")
-        ffprobe_path = shutil.which("ffprobe")
-        if ffmpeg_path:
-            AudioSegment.converter = ffmpeg_path
-            AudioSegment.ffmpeg = ffmpeg_path
-        if ffprobe_path:
-            AudioSegment.ffprobe = ffprobe_path
+        # CORREÇÃO LOCAL: Aponta para os binários baixados pelo build.sh na raiz do projeto
+        diretorio_atual = os.path.dirname(os.path.abspath(__file__))
+        ffmpeg_local = os.path.join(diretorio_atual, "ffmpeg")
+        ffprobe_local = os.path.join(diretorio_atual, "ffprobe")
+
+        # Se os binários locais existirem, injeta-os diretamente na Pydub
+        if os.path.exists(ffmpeg_local):
+            AudioSegment.converter = ffmpeg_local
+            AudioSegment.ffmpeg = ffmpeg_local
+            print(f"✅ FFmpeg local detetado em: {ffmpeg_local}")
+        if os.path.exists(ffprobe_local):
+            AudioSegment.ffprobe = ffprobe_local
 
         print(f"📥 Baixando áudio da Twilio...")
         resposta = requests.get(url_audio)
@@ -139,12 +142,38 @@ def transcrever_audio_whatsapp(url_audio):
         audio = AudioSegment.from_file(arquivo_ogg, format="ogg")
         audio.export(arquivo_wav, format="wav")
 
-        print("🎙️ Enviando para o Google Speech Recognition...")
+        print("🎙️ Iniciando reconhecimento de voz multi-idioma...")
         reconhecedor = sr.Recognizer()
+
+        # Ajuste de ruído dinâmico para melhorar a leitura de sotaques em áudios de rua/WhatsApp
+        reconhecedor.dynamic_energy_threshold = True
+
         with sr.AudioFile(arquivo_wav) as fonte:
+            # Ajusta o microfone virtual para o ruído de fundo do áudio recebido
+            reconhecedor.adjust_for_ambient_noise(fonte, duration=0.5)
             dados_audio = reconhecedor.record(fonte)
-            texto_transcrito = reconhecedor.recognize_google(
-                dados_audio, language="pt-PT")
+
+        # Lista de idiomas/sotaques suportados em ordem de probabilidade do teu público
+        # pt-PT (Portugal), pt-BR (Brasil), es-ES (Espanha), en-US (Inglês), fr-FR (França)
+        idiomas_suportados = ["pt-PT", "pt-BR", "es-ES", "en-US", "fr-FR"]
+        texto_transcrito = ""
+
+        # Tentativa em cascata: testa os idiomas até conseguir uma tradução válida
+        for idioma in idiomas_suportados:
+            try:
+                print(f"🗣️ Tentando decifrar sotaque/idioma em: {idioma}...")
+                texto_transcrito = reconhecedor.recognize_google(
+                    dados_audio, language=idioma)
+                if texto_transcrito.strip():
+                    print(
+                        f"🎯 Sucesso com o idioma [{idioma}]: '{texto_transcrito}'")
+                    break
+            except sr.UnknownValueError:
+                # O Google não entendeu neste idioma específico, pula para o próximo da lista
+                continue
+            except sr.RequestError:
+                # Falha de conexão com a API do Google, tenta o próximo por segurança
+                continue
 
         return texto_transcrito
 
