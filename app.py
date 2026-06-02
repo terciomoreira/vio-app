@@ -1,10 +1,12 @@
 import sys
 import types
+
 # ==============================================================================
-# 🚨 PROTOCOLO DE INICIALIZAÇÃO ABSOLUTA: LINHAS 1 A 4
-# ESTA EMULAÇÃO TEM DE OCORRER ANTES DE QUALQUER OUTRA COMPILAÇÃO DO PYTHON!
+# 🚨 EMULAÇÃO MANDATÓRIA DO MÓDULO REMOVIDO NO PYTHON 3.14
+# ISSO RESOLVE O CRASH DE IMPORTAÇÃO SEM PRECISAR DE INSTALAÇÃO NO REQUIREMENTS
 # ==============================================================================
-#sys.modules['aifc'] = types.ModuleType('aifc')
+if 'aifc' not in sys.modules:
+    sys.modules['aifc'] = types.ModuleType('aifc')
 
 import os
 import re
@@ -14,9 +16,11 @@ import spacy
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 
-# Agora com o aifc emulado em memória, as bibliotecas da Google podem ser lidas
+# Agora com a emulação ativa, o carregamento do Google GenAI não vai quebrar
 from google import genai
 from google.genai import types as genai_types
+
+# ... (Mantenha o restante de todas as funções do seu app.py exatamente como estão)
 
 # Inicializa o Flask
 app = Flask(__name__)
