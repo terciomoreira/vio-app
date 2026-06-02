@@ -1,32 +1,11 @@
-import sys
-import types
-
-# ==============================================================================
-# 🚨 EMULAÇÃO MANDATÓRIA DE MÓDULOS REMOVIDOS NO PYTHON 3.14
-# ISSO RESOLVE O CRASH DE IMPORTAÇÃO DO PYDUB ('audioop' e 'aifc')
-# ==============================================================================
-if 'aifc' not in sys.modules:
-    sys.modules['aifc'] = types.ModuleType('aifc')
-
-if 'audioop' not in sys.modules:
-    # Cria uma emulação leve do audioop para enganar a verificação inicial do pydub
-    mock_audioop = types.ModuleType('audioop')
-    mock_audioop.error = Exception
-    sys.modules['audioop'] = mock_audioop
-
-if 'pyaudioop' not in sys.modules:
-    sys.modules['pyaudioop'] = sys.modules['audioop']
-# ==============================================================================
-
 import os
 import json
 from datetime import datetime
 import requests
-import pydub
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 
-# Importação correta e estável do Novo SDK do Gemini
+# Importação do Novo SDK do Gemini
 import google.genai as genai
 from google.genai import types as genai_types
 
@@ -56,7 +35,6 @@ def obter_arquivo_usuario(numero_whatsapp):
 def inteligência_universal_gemini(texto_ou_transcricao):
     """
     Usa o Gemini como interpretador universal de idiomas para extrair dados financeiros.
-    Remove totalmente a necessidade de regex locais ou modelos rígidos do SpaCy.
     """
     if not client:
         return "Saída", "", "Desconhecido", "Outros Gastos"
@@ -93,32 +71,34 @@ def inteligência_universal_gemini(texto_ou_transcricao):
 
 
 def transcrever_audio_whatsapp(url_audio):
+    """
+    Nova abordagem nativa: Baixa o áudio e envia diretamente ao Gemini.
+    Elimina o uso do pydub e evita colisões com o Python 3.14.
+    """
     if not client:
         print("❌ Motor indisponível: Cliente Gemini offline.")
         return ""
 
     arquivo_ogg = os.path.join(os.getcwd(), "audio_temp.ogg")
-    arquivo_wav = os.path.join(os.getcwd(), "audio_temp.wav")
 
     try:
-        print("📥 Fazendo download do áudio do WhatsApp...")
+        print("📥 Fazendo download do áudio original do WhatsApp...")
         resposta = requests.get(url_audio)
         with open(arquivo_ogg, "wb") as f:
             f.write(resposta.content)
 
-        # Conversão utilizando os binários globais do sistema instalados pelos buildpacks
-        audio = pydub.AudioSegment.from_file(arquivo_ogg, format="ogg")
-        audio = audio.set_frame_rate(16000).set_channels(1)
-        audio.export(arquivo_wav, format="wav")
-
-        print("🎙️ Fazendo upload do WAV para o Gemini...")
-        audio_file_gemini = client.files.upload(file=arquivo_wav)
+        print("🎙️ Enviando arquivo OGG nativo diretamente para o Gemini...")
+        # O Gemini aceita nativamente arquivos de áudio encapsulados em OGG/Opus
+        audio_file_gemini = client.files.upload(
+            file=arquivo_ogg,
+            config=genai_types.UploadFileConfig(mime_type="audio/ogg")
+        )
 
         resposta_gemini = client.models.generate_content(
             model="gemini-1.5-flash",
             contents=[
-                "Transcreva este áudio exatamente na língua em que foi falado. "
-                "Retorne única e exclusivamente o texto transcrito puro.",
+                "Transcreva este áudio exatamente na língua em que foi falado de forma universal. "
+                "Retorne única e exclusivamente o texto transcrito puro, sem comentários.",
                 audio_file_gemini
             ]
         )
@@ -134,12 +114,11 @@ def transcrever_audio_whatsapp(url_audio):
         return texto_transcrito
 
     except Exception as e:
-        print(f"❌ Falha crítica interna no processamento de áudio: {e}")
+        print(f"❌ Falha crítica no processamento de áudio nativo: {e}")
         return ""
     finally:
-        for f_temp in [arquivo_ogg, arquivo_wav]:
-            if os.path.exists(f_temp):
-                os.remove(f_temp)
+        if os.path.exists(arquivo_ogg):
+            os.remove(arquivo_ogg)
 
 
 def escanear_recibo_gemini(url_imagem):
@@ -155,7 +134,7 @@ def escanear_recibo_gemini(url_imagem):
 
         prompt = (
             "Analise este recibo de forma universal. Transcreva o que foi gasto, "
-            "o valor total e o local em uma frase corta."
+            "o valor total e o local em uma frase curta."
         )
 
         resposta_gemini = client.models.generate_content(
@@ -193,13 +172,12 @@ def whatsapp_reply():
     if num_midias > 0:
         url_midia = request.values.get("MediaUrl0", "")
         if url_midia:
-            if "audio" in tipo_midia or "ogg" in url_midia:
+            if "audio" in tipo_midia or "ogg" in url_midia or "audio/ogg" in tipo_midia:
                 texto_recebido = transcrever_audio_whatsapp(url_midia)
             elif "image" in tipo_midia:
                 texto_recebido = escanear_recibo_gemini(url_midia)
 
     if texto_recebido:
-        # Processamento universal baseado no Gemini (independente de idioma)
         tipo, v, l, c = inteligência_universal_gemini(texto_recebido)
 
         if v and l:
