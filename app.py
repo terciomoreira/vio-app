@@ -1,5 +1,10 @@
+# ==============================================================================
+# 🚨 LINHAS 1 A 5: ANTES DE QUALQUER OUTRO IMPORT DO SISTEMA OU IA
+# ==============================================================================
 from google.genai import types as genai_types
 from google import genai
+from pydub import AudioSegment
+import pydub
 from twilio.twiml.messaging_response import MessagingResponse
 from flask import Flask, request
 import spacy
@@ -9,32 +14,35 @@ import re
 import os
 import sys
 import types
-# ==============================================================================
-# 🚨 ORDEM CRÍTICA REVOLUCIONÁRIA: ESTA EMULAÇÃO TEM DE SER A LINHA 1, 2 E 3!
-# NÃO PODE EXISTIR NENHUM IMPORT DE IA OU BIBLIOTECA ANTES DESTO!
-# ==============================================================================
 sys.modules['aifc'] = types.ModuleType('aifc')
 
 
-# Agora sim, os imports da Google acontecem em segurança com o aifc já emulado
+# Configuração explícita e global do FFmpeg para o Pydub
+diretorio_atual = os.getcwd()
+ffmpeg_local = os.path.join(diretorio_atual, "ffmpeg")
+if os.path.exists(ffmpeg_local):
+    pydub.AudioSegment.converter = ffmpeg_local
+    print("🚀 FFmpeg local mapeado com sucesso no escopo global do Pydub!")
+
+# Agora sim, os imports da Google acontecem em total segurança
 
 # Inicializa o Flask
 app = Flask(__name__)
 
-# Configuração Global da API do Gemini (Lê do Render)
+# Configuração Global da API do Gemini
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 client = None
 
 if GEMINI_API_KEY:
     client = genai.Client(api_key=GEMINI_API_KEY)
-    print("🚀 Novo SDK do Gemini inicializado com sucesso a partir do Render!")
+    print("🚀 Novo SDK do Gemini inicializado com sucesso!")
 else:
     print("⚠️ AVISO: GEMINI_API_KEY não detetada nas variáveis de ambiente!")
 
-# Carrega o SpaCy de forma direta (já instalado via requirements.txt)
+# Carrega o SpaCy
 try:
     nlp = spacy.load("pt_core_news_sm")
-    print("🚀 IA do SpaCy carregada com sucesso a partir do ambiente!")
+    print("🚀 IA do SpaCy carregada com sucesso!")
 except Exception as e:
     print(f"❌ Erro ao carregar o SpaCy: {e}. Usando fallback textual.")
     nlp = None
@@ -120,24 +128,17 @@ def transcrever_audio_whatsapp(url_audio):
     arquivo_wav = os.path.join(os.getcwd(), "audio_temp.wav")
 
     try:
-        diretorio_atual = os.getcwd()
-        ffmpeg_local = os.path.join(diretorio_atual, "ffmpeg")
-        if os.path.exists(ffmpeg_local):
-            import pydub
-            pydub.AudioSegment.converter = ffmpeg_local
-
         print("📥 Fazendo download do áudio da Twilio...")
         resposta = requests.get(url_audio)
         with open(arquivo_ogg, "wb") as f:
             f.write(resposta.content)
 
-        print("🔄 Convertendo arquivo OGG para WAV...")
-        from pydub import AudioSegment
+        print("🔄 Convertendo arquivo OGG para WAV com FFmpeg mapeado globalmente...")
         audio = AudioSegment.from_file(arquivo_ogg, format="ogg")
         audio = audio.set_frame_rate(16000).set_channels(1)
         audio.export(arquivo_wav, format="wav")
 
-        print("🎙️ Enviando áudio para o NOVO SDK do Gemini...")
+        print("🎙️ Enviando áudio estável para o SDK do Gemini...")
         audio_file_gemini = client.files.upload(file=arquivo_wav)
 
         resposta_gemini = client.models.generate_content(
