@@ -2,10 +2,10 @@ import os
 import json
 from datetime import datetime
 import requests
-from flask import Flask, request
+from flask import Flask, request  # <-- CORRIGIDO: f minúsculo
 from twilio.twiml.messaging_response import MessagingResponse
 
-# IMPORTAÇÃO LEVE: Substituímos o google.genai pelo pacote clássico e estável
+# IMPORTAÇÃO LEVE: Pacote clássico e estável
 import google.generativeai as genai
 
 app = Flask(__name__)
@@ -15,10 +15,10 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
 
-# Inicializa o ecossistema do Gemini de forma ultra leve
+# Inicializa o ecossistema do Gemini
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    print("🚀 API do Gemini configurada com sucesso na versão leve!")
+    print("🚀 API do Gemini configurada com sucesso!")
 else:
     print("⚠️ AVISO: GEMINI_API_KEY não localizada.")
 
@@ -32,7 +32,8 @@ def obter_arquivo_usuario(numero_whatsapp):
     return csv_usuario
 
 
-def inteligência_universal_gemini(texto_ou_transcricao):
+# <-- CORRIGIDO: Sem acento
+def inteligencia_universal_gemini(texto_ou_transcricao):
     if not GEMINI_API_KEY:
         return "Saída", "", "Desconhecido", "Outros Gastos"
 
@@ -50,7 +51,6 @@ def inteligência_universal_gemini(texto_ou_transcricao):
     )
 
     try:
-        # Chamada otimizada usando a biblioteca estável
         model = genai.GenerativeModel("gemini-1.5-flash")
         resposta = model.generate_content(prompt)
         dados = json.loads(resposta.text.strip())
@@ -84,8 +84,6 @@ def transcrever_audio_whatsapp(url_audio):
             f.write(resposta.content)
 
         print("🎙️ Enviando áudio nativo ao Gemini via API Otimizada...")
-
-        # Envio nativo de arquivos usando o gerenciador de mídias clássico
         audio_file_gemini = genai.upload_file(
             path=arquivo_ogg, mime_type="audio/ogg")
 
@@ -127,7 +125,7 @@ def escanear_recibo_gemini(url_imagem):
             f.write(resposta.content)
 
         foto_gemini = genai.upload_file(path=arquivo_img)
-        prompt = "Analise este recibo de forma universal. Transcreva o que foi gasto, o valor total e o local em uma frase curta."
+        prompt = "Analise este recibo de forma universal. Transcreva o que foi gasto, o valor total e o local em uma frase corta."
 
         model = genai.GenerativeModel("gemini-1.5-flash")
         resposta_gemini = model.generate_content([prompt, foto_gemini])
@@ -167,7 +165,8 @@ def whatsapp_reply():
                 texto_recebido = escanear_recibo_gemini(url_midia)
 
     if texto_recebido:
-        tipo, v, l, c = inteligência_universal_gemini(texto_recebido)
+        # <-- CORRIGIDO: Nome da função sem acento chamado aqui
+        tipo, v, l, c = inteligencia_universal_gemini(texto_recebido)
         if v and l:
             data_atual = datetime.now().strftime("%Y-%m-%d %H:%M")
             with open(csv_usuario, "a", encoding="utf-8") as f:
