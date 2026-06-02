@@ -9,23 +9,21 @@ from twilio.twiml.messaging_response import MessagingResponse
 import google.genai as genai
 from google.genai import types as genai_types
 
-# Inicializa o Flask
 app = Flask(__name__)
 
-# Configuração Global da API do Gemini
+# Configurações Globais via Variáveis de Ambiente
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-client = None
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
 
-if GEMINI_API_KEY:
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    print("🚀 Novo SDK do Gemini inicializado com sucesso!")
-else:
-    print("⚠️ AVISO: GEMINI_API_KEY não localizada nas variáveis de ambiente.")
+client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 
 def obter_arquivo_usuario(numero_whatsapp):
     id_usuario = numero_whatsapp.replace("whatsapp:", "").strip()
-    csv_usuario = f"financeiro_{id_usuario}.csv"
+    # No ambiente Serverless da Vercel, gravação de arquivos locais persistentes não é recomendada,
+    # mas usamos a pasta /tmp para evitar falhas de permissão de escrita.
+    csv_usuario = f"/tmp/financeiro_{id_usuario}.csv"
     if not os.path.exists(csv_usuario):
         with open(csv_usuario, "w", encoding="utf-8") as f:
             f.write("Data,Tipo,Valor,Local/Origem,Categoria\n")
@@ -33,9 +31,6 @@ def obter_arquivo_usuario(numero_whatsapp):
 
 
 def inteligência_universal_gemini(texto_ou_transcricao):
-    """
-    Usa o Gemini como interpretador universal de idiomas para extrair dados financeiros.
-    """
     if not client:
         return "Saída", "", "Desconhecido", "Outros Gastos"
 
@@ -53,42 +48,32 @@ def inteligência_universal_gemini(texto_ou_transcricao):
     )
 
     try:
-        resposta = client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=prompt
-        )
+        resposta = client.models.generate_content(model="gemini-1.5-flash", contents=prompt)
         dados = json.loads(resposta.text.strip())
-
-        tipo = dados.get("tipo", "Saída")
-        valor = dados.get("valor", "")
-        local = dados.get("local", "Desconhecido")
-        categoria = dados.get("categoria", "Outros Gastos")
-
-        return tipo, valor, local, categoria
+        return dados.get("tipo", "Saída"), dados.get("valor", ""), dados.get("local", "Desconhecido"), dados.get("categoria", "Outros Gastos")
     except Exception as e:
-        print(f"❌ Erro na análise inteligente do Gemini: {e}")
+        print(f"❌ Erro na análise do Gemini: {e}")
         return "Saída", "", "Desconhecido", "Outros Gastos"
 
 
 def transcrever_audio_whatsapp(url_audio):
-    """
-    Nova abordagem nativa: Baixa o áudio e envia diretamente ao Gemini.
-    Elimina o uso do pydub e evita colisões com o Python 3.14.
-    """
     if not client:
-        print("❌ Motor indisponível: Cliente Gemini offline.")
         return ""
 
-    arquivo_ogg = os.path.join(os.getcwd(), "audio_temp.ogg")
+    arquivo_ogg = "/tmp/audio_temp.ogg"
 
     try:
-        print("📥 Fazendo download do áudio original do WhatsApp...")
-        resposta = requests.get(url_audio)
+        print("📥 Fazendo download autenticado do áudio do WhatsApp...")
+        # CORREÇÃO CRÍTICA: Passando as credenciais do Twilio para liberar o arquivo de áudio
+        if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
+            resposta = requests.get(url_audio, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
+        else:
+            resposta = requests.get(url_audio)
+
         with open(arquivo_ogg, "wb") as f:
             f.write(resposta.content)
 
-        print("🎙️ Enviando arquivo OGG nativo diretamente para o Gemini...")
-        # O Gemini aceita nativamente arquivos de áudio encapsulados em OGG/Opus
+        print("🎙️ Enviando áudio nativo ao Gemini...")
         audio_file_gemini = client.files.upload(
             file=arquivo_ogg,
             config=genai_types.UploadFileConfig(mime_type="audio/ogg")
@@ -97,24 +82,21 @@ def transcrever_audio_whatsapp(url_audio):
         resposta_gemini = client.models.generate_content(
             model="gemini-1.5-flash",
             contents=[
-                "Transcreva este áudio exatamente na língua em que foi falado de forma universal. "
-                "Retorne única e exclusivamente o texto transcrito puro, sem comentários.",
+                "Transcreva este áudio exatamente na língua em que foi falado de forma universal. Retorne apenas o texto puro.",
                 audio_file_gemini
             ]
         )
 
         texto_transcrito = resposta_gemini.text.strip()
-        print(f"🎯 Transcrição universal concluída: {texto_transcrito}")
-
+        
         try:
             client.files.delete(name=audio_file_gemini.name)
         except Exception:
             pass
 
         return texto_transcrito
-
     except Exception as e:
-        print(f"❌ Falha crítica no processamento de áudio nativo: {e}")
+        print(f"❌ Falha no processamento de áudio: {e}")
         return ""
     finally:
         if os.path.exists(arquivo_ogg):
@@ -124,33 +106,28 @@ def transcrever_audio_whatsapp(url_audio):
 def escanear_recibo_gemini(url_imagem):
     if not client:
         return ""
-    arquivo_img = os.path.join(os.getcwd(), "temp_recibo.jpg")
+    arquivo_img = "/tmp/temp_recibo.jpg"
     try:
-        resposta = requests.get(url_imagem)
+        if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
+            resposta = requests.get(url_imagem, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
+        else:
+            resposta = requests.get(url_imagem)
+            
         with open(arquivo_img, "wb") as f:
             f.write(resposta.content)
 
         foto_gemini = client.files.upload(file=arquivo_img)
-
-        prompt = (
-            "Analise este recibo de forma universal. Transcreva o que foi gasto, "
-            "o valor total e o local em uma frase curta."
-        )
-
-        resposta_gemini = client.models.generate_content(
-            model="gemini-1.5-flash",
-            contents=[prompt, foto_gemini]
-        )
-
+        prompt = "Analise este recibo de forma universal. Transcreva o que foi gasto, o valor total e o local em uma frase curta."
+        resposta_gemini = client.models.generate_content(model="gemini-1.5-flash", contents=[prompt, foto_gemini])
+        
         try:
             client.files.delete(name=foto_gemini.name)
         except Exception:
             pass
 
         return resposta_gemini.text.strip()
-
     except Exception as e:
-        print(f"❌ Erro ao escanear nota fiscal: {e}")
+        print(f"❌ Erro ao escanear imagem: {e}")
         return ""
     finally:
         if os.path.exists(arquivo_img):
@@ -179,31 +156,27 @@ def whatsapp_reply():
 
     if texto_recebido:
         tipo, v, l, c = inteligência_universal_gemini(texto_recebido)
-
         if v and l:
             data_atual = datetime.now().strftime("%Y-%m-%d %H:%M")
             with open(csv_usuario, "a", encoding="utf-8") as f:
                 f.write(f"{data_atual},{tipo},{v},{l},{c}\n")
 
             if tipo == "Entrada":
-                msg.body(
-                    f"💰 *Vio:* Transcrito: *\"{texto_recebido}\"* -> Entrada de {v} em *({c})*.")
+                msg.body(f"💰 *Vio:* Transcrito: *\"{texto_recebido}\"* -> Entrada de {v} em *({c})*.")
             else:
-                msg.body(
-                    f"✅ *Vio:* Transcrito: *\"{texto_recebido}\"* -> Despesa de {v} no {l} em *({c})*.")
+                msg.body(f"✅ *Vio:* Transcrito: *\"{texto_recebido}\"* -> Despesa de {v} no {l} em *({c})*.")
         else:
-            msg.body(
-                f"⚠️ *Vio:* Entendi: \"{texto_recebido}\", mas não consegui extrair com precisão os valores.")
+            msg.body(f"⚠️ *Vio:* Entendi: \"{texto_recebido}\", mas não consegui extrair os valores.")
     else:
-        if num_midias > 0:
-            if "image" in tipo_midia:
-                msg.body(
-                    "⚠️ *Vio:* Não consegui ler esta foto. Certifique-se de que está legível.")
-            else:
-                msg.body(
-                    "⚠️ *Vio:* Recebi o seu áudio, mas o interpretador falhou ao processar os arquivos de conversão.")
+        msg.body("⚠️ *Vio:* Recebi o seu arquivo de mídia, mas o download ou a interpretação falhou.")
 
     return str(resposta_twilio)
+
+
+# Necessário para a Vercel interpretar o app Flask corretamente
+@app.route("/")
+def index():
+    return "Bot Online e Operante na Vercel!"
 
 
 if __name__ == "__main__":
