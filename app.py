@@ -37,7 +37,7 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
         return "Saída", "", "Desconhecido", "Outros Gastos"
 
     prompt = (
-        "Analise a seguinte frase sobre finanças (que pode estar em qualquer idioma): "
+        "Analise a seguinte frase sobre finanças: "
         f'"{texto_ou_transcricao}"\n\n'
         "Extraia os seguintes dados estruturados exatamente no formato JSON:\n"
         "{\n"
@@ -45,12 +45,15 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
         '  "valor": "apenas os números usando ponto como separador decimal (ex: 24.50)",\n'
         '  "local": "Nome do local, estabelecimento ou origem do dinheiro capitalizado",\n'
         '  "categoria": "Uma categoria adequada com emoji (ex: 🛒 Supermercado, 🍕 Lazer, 🏠 Contas Fixas, 🚗 Transporte, 💰 Ordenado/Ganhos, 📈 Extras)"\n'
-        "}\n"
-        "Retorne APENAS o JSON puro, sem marcações de markdown (como ```json) ou textos adicionais."
+        "}"
     )
 
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        # Configura o modelo para responder estritamente em JSON nativo
+        model = genai.GenerativeModel(
+            "gemini-1.5-flash",
+            generation_config={"response_mime_type": "application/json"}
+        )
         resposta = model.generate_content(prompt)
         dados = json.loads(resposta.text.strip())
 
@@ -166,7 +169,7 @@ def whatsapp_reply():
         if texto_recebido:
             tipo, v, l, c = inteligencia_universal_gemini(texto_recebido)
 
-            # CORREÇÃO CRÍTICA: Se tiver valor, o bot processa. Local vazio vira "Não especificado"
+            # Se tiver valor, o bot processa. Local vazio vira "Não especificado"
             if v:
                 if not l:
                     l = "Não especificado"
