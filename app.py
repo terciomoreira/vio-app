@@ -2,7 +2,7 @@ import os
 import json
 from datetime import datetime
 import requests
-from Flask import Flask, request
+from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 
 # IMPORTAÇÃO LEVE: Substituímos o google.genai pelo pacote clássico e estável
