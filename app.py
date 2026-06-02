@@ -48,7 +48,8 @@ def inteligência_universal_gemini(texto_ou_transcricao):
     )
 
     try:
-        resposta = client.models.generate_content(model="gemini-1.5-flash", contents=prompt)
+        resposta = client.models.generate_content(
+            model="gemini-1.5-flash", contents=prompt)
         dados = json.loads(resposta.text.strip())
         return dados.get("tipo", "Saída"), dados.get("valor", ""), dados.get("local", "Desconhecido"), dados.get("categoria", "Outros Gastos")
     except Exception as e:
@@ -66,7 +67,8 @@ def transcrever_audio_whatsapp(url_audio):
         print("📥 Fazendo download autenticado do áudio do WhatsApp...")
         # CORREÇÃO CRÍTICA: Passando as credenciais do Twilio para liberar o arquivo de áudio
         if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
-            resposta = requests.get(url_audio, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
+            resposta = requests.get(url_audio, auth=(
+                TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
         else:
             resposta = requests.get(url_audio)
 
@@ -88,7 +90,7 @@ def transcrever_audio_whatsapp(url_audio):
         )
 
         texto_transcrito = resposta_gemini.text.strip()
-        
+
         try:
             client.files.delete(name=audio_file_gemini.name)
         except Exception:
@@ -109,17 +111,19 @@ def escanear_recibo_gemini(url_imagem):
     arquivo_img = "/tmp/temp_recibo.jpg"
     try:
         if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
-            resposta = requests.get(url_imagem, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
+            resposta = requests.get(url_imagem, auth=(
+                TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
         else:
             resposta = requests.get(url_imagem)
-            
+
         with open(arquivo_img, "wb") as f:
             f.write(resposta.content)
 
         foto_gemini = client.files.upload(file=arquivo_img)
         prompt = "Analise este recibo de forma universal. Transcreva o que foi gasto, o valor total e o local em uma frase curta."
-        resposta_gemini = client.models.generate_content(model="gemini-1.5-flash", contents=[prompt, foto_gemini])
-        
+        resposta_gemini = client.models.generate_content(
+            model="gemini-1.5-flash", contents=[prompt, foto_gemini])
+
         try:
             client.files.delete(name=foto_gemini.name)
         except Exception:
@@ -162,13 +166,17 @@ def whatsapp_reply():
                 f.write(f"{data_atual},{tipo},{v},{l},{c}\n")
 
             if tipo == "Entrada":
-                msg.body(f"💰 *Vio:* Transcrito: *\"{texto_recebido}\"* -> Entrada de {v} em *({c})*.")
+                msg.body(
+                    f"💰 *Vio:* Transcrito: *\"{texto_recebido}\"* -> Entrada de {v} em *({c})*.")
             else:
-                msg.body(f"✅ *Vio:* Transcrito: *\"{texto_recebido}\"* -> Despesa de {v} no {l} em *({c})*.")
+                msg.body(
+                    f"✅ *Vio:* Transcrito: *\"{texto_recebido}\"* -> Despesa de {v} no {l} em *({c})*.")
         else:
-            msg.body(f"⚠️ *Vio:* Entendi: \"{texto_recebido}\", mas não consegui extrair os valores.")
+            msg.body(
+                f"⚠️ *Vio:* Entendi: \"{texto_recebido}\", mas não consegui extrair os valores.")
     else:
-        msg.body("⚠️ *Vio:* Recebi o seu arquivo de mídia, mas o download ou a interpretação falhou.")
+        msg.body(
+            "⚠️ *Vio:* Recebi o seu arquivo de mídia, mas o download ou a interpretação falhou.")
 
     return str(resposta_twilio)
 
