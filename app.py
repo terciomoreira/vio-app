@@ -4,7 +4,7 @@ import types
 # 🚨 PROTOCOLO DE INICIALIZAÇÃO ABSOLUTA: LINHAS 1 A 4
 # ESTA EMULAÇÃO TEM DE OCORRER ANTES DE QUALQUER OUTRA COMPILAÇÃO DO PYTHON!
 # ==============================================================================
-sys.modules['aifc'] = types.ModuleType('aifc')
+#sys.modules['aifc'] = types.ModuleType('aifc')
 
 import os
 import re
