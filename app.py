@@ -2,10 +2,21 @@ import sys
 import types
 
 # ==============================================================================
-# 🚨 EMULAÇÃO MANDATÓRIA DO MÓDULO REMOVIDO NO PYTHON 3.14
+# 🚨 EMULAÇÃO MANDATÓRIA DE MÓDULOS REMOVIDOS NO PYTHON 3.14
+# ISSO RESOLVE O CRASH DE IMPORTAÇÃO DO PYDUB ('audioop' e 'aifc')
 # ==============================================================================
 if 'aifc' not in sys.modules:
     sys.modules['aifc'] = types.ModuleType('aifc')
+
+if 'audioop' not in sys.modules:
+    # Cria uma emulação leve do audioop para enganar a verificação inicial do pydub
+    mock_audioop = types.ModuleType('audioop')
+    mock_audioop.error = Exception
+    sys.modules['audioop'] = mock_audioop
+
+if 'pyaudioop' not in sys.modules:
+    sys.modules['pyaudioop'] = sys.modules['audioop']
+# ==============================================================================
 
 import os
 import json
@@ -90,8 +101,6 @@ def transcrever_audio_whatsapp(url_audio):
     arquivo_wav = os.path.join(os.getcwd(), "audio_temp.wav")
 
     try:
-        # CORREÇÃO DO ERRO DO PRINT: Deixar o pydub encontrar o FFmpeg do sistema automaticamente
-        # Não forçamos mais caminhos locais relativos que não existem no Render
         print("📥 Fazendo download do áudio do WhatsApp...")
         resposta = requests.get(url_audio)
         with open(arquivo_ogg, "wb") as f:
@@ -146,7 +155,7 @@ def escanear_recibo_gemini(url_imagem):
 
         prompt = (
             "Analise este recibo de forma universal. Transcreva o que foi gasto, "
-            "o valor total e o local em uma frase curta."
+            "o valor total e o local em uma frase corta."
         )
 
         resposta_gemini = client.models.generate_content(
@@ -190,7 +199,7 @@ def whatsapp_reply():
                 texto_recebido = escanear_recibo_gemini(url_midia)
 
     if texto_recebido:
-        # Aqui entra o processamento universal baseado no Gemini (independente de idioma)
+        # Processamento universal baseado no Gemini (independente de idioma)
         tipo, v, l, c = inteligência_universal_gemini(texto_recebido)
 
         if v and l:
