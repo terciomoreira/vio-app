@@ -2,7 +2,7 @@ import os
 import json
 from datetime import datetime
 import requests
-from flask import Flask, request  # <-- CORRIGIDO: f minúsculo
+from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 
 # IMPORTAÇÃO LEVE: Pacote clássico e estável
@@ -32,7 +32,6 @@ def obter_arquivo_usuario(numero_whatsapp):
     return csv_usuario
 
 
-# <-- CORRIGIDO: Sem acento
 def inteligencia_universal_gemini(texto_ou_transcricao):
     if not GEMINI_API_KEY:
         return "Saída", "", "Desconhecido", "Outros Gastos"
@@ -125,7 +124,7 @@ def escanear_recibo_gemini(url_imagem):
             f.write(resposta.content)
 
         foto_gemini = genai.upload_file(path=arquivo_img)
-        prompt = "Analise este recibo de forma universal. Transcreva o que foi gasto, o valor total e o local em uma frase corta."
+        prompt = "Analise este recibo de forma universal. Transcreva o que foi gasto, o valor total e o local em uma frase curta."
 
         model = genai.GenerativeModel("gemini-1.5-flash")
         resposta_gemini = model.generate_content([prompt, foto_gemini])
@@ -147,7 +146,6 @@ def escanear_recibo_gemini(url_imagem):
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp_reply():
     remetente = request.values.get("From", "")
-    csv_usuario = obter_arquivo_usuario(remetente)
 
     texto_recebido = request.values.get("Body", "").strip()
     num_midias = int(request.values.get("NumMedia", 0))
@@ -156,34 +154,49 @@ def whatsapp_reply():
     resposta_twilio = MessagingResponse()
     msg = resposta_twilio.message()
 
-    if num_midias > 0:
-        url_midia = request.values.get("MediaUrl0", "")
-        if url_midia:
-            if "audio" in tipo_midia or "ogg" in url_midia or "audio/ogg" in tipo_midia:
-                texto_recebido = transcrever_audio_whatsapp(url_midia)
-            elif "image" in tipo_midia:
-                texto_recebido = escanear_recibo_gemini(url_midia)
+    try:
+        if num_midias > 0:
+            url_midia = request.values.get("MediaUrl0", "")
+            if url_midia:
+                if "audio" in tipo_midia or "ogg" in url_midia or "audio/ogg" in tipo_midia:
+                    texto_recebido = transcrever_audio_whatsapp(url_midia)
+                elif "image" in tipo_midia:
+                    texto_recebido = escanear_recibo_gemini(url_midia)
 
-    if texto_recebido:
-        # <-- CORRIGIDO: Nome da função sem acento chamado aqui
-        tipo, v, l, c = inteligencia_universal_gemini(texto_recebido)
-        if v and l:
-            data_atual = datetime.now().strftime("%Y-%m-%d %H:%M")
-            with open(csv_usuario, "a", encoding="utf-8") as f:
-                f.write(f"{data_atual},{tipo},{v},{l},{c}\n")
+        if texto_recebido:
+            tipo, v, l, c = inteligencia_universal_gemini(texto_recebido)
 
-            if tipo == "Entrada":
-                msg.body(
-                    f"💰 *Vio:* Transcrito: *\"{texto_recebido}\"* -> Entrada de {v} em *({c})*.")
+            # CORREÇÃO CRÍTICA: Se tiver valor, o bot processa. Local vazio vira "Não especificado"
+            if v:
+                if not l:
+                    l = "Não especificado"
+
+                # Tentativa de escrita segura num bloco try independente
+                try:
+                    csv_usuario = obter_arquivo_usuario(remetente)
+                    data_atual = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    with open(csv_usuario, "a", encoding="utf-8") as f:
+                        f.write(f"{data_atual},{tipo},{v},{l},{c}\n")
+                except Exception as e_file:
+                    print(
+                        f"❌ Erro ao salvar arquivo (mas o bot vai responder): {e_file}")
+
+                if tipo == "Entrada":
+                    msg.body(
+                        f"💰 *Vio:* Entendi: *\"{texto_recebido}\"* -> Entrada de {v} em *({c})*.")
+                else:
+                    msg.body(
+                        f"✅ *Vio:* Entendi: *\"{texto_recebido}\"* -> Despesa de {v} no {l} em *({c})*.")
             else:
                 msg.body(
-                    f"✅ *Vio:* Transcrito: *\"{texto_recebido}\"* -> Despesa de {v} no {l} em *({c})*.")
+                    f"⚠️ *Vio:* Entendi: \"{texto_recebido}\", mas não consegui extrair os valores com precisão.")
         else:
             msg.body(
-                f"⚠️ *Vio:* Entendi: \"{texto_recebido}\", mas não consegui extrair os valores com precisão.")
-    else:
-        msg.body(
-            "⚠️ *Vio:* Recebi o seu arquivo de mídia, mas o download ou a interpretação do Gemini falhou.")
+                "⚠️ *Vio:* Recebi o seu arquivo de mídia, mas o download ou a interpretação do Vio falhou.")
+
+    except Exception as e_geral:
+        # Garante resposta visual imediata no WhatsApp caso ocorra bug em tempo de execução
+        msg.body(f"❌ *Erro Interno do Bot:* {str(e_geral)}")
 
     return str(resposta_twilio)
 
