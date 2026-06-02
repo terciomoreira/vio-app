@@ -3,29 +3,26 @@ import types
 
 # ==============================================================================
 # 🚨 EMULAÇÃO MANDATÓRIA DO MÓDULO REMOVIDO NO PYTHON 3.14
-# ISSO RESOLVE O CRASH DE IMPORTAÇÃO SEM PRECISAR DE INSTALAÇÃO NO REQUIREMENTS
 # ==============================================================================
 if 'aifc' not in sys.modules:
     sys.modules['aifc'] = types.ModuleType('aifc')
 
 import os
-import re
+import json
 from datetime import datetime
 import requests
-import spacy
+import pydub
 from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 
-# Agora com a emulação ativa, o carregamento do Google GenAI não vai quebrar
-from google import genai
+# Importação correta e estável do Novo SDK do Gemini
+import google.genai as genai
 from google.genai import types as genai_types
-
-# ... (Mantenha o restante de todas as funções do seu app.py exatamente como estão)
 
 # Inicializa o Flask
 app = Flask(__name__)
 
-# Configuração Global e Estrita da API do Gemini (Puxando a variável do Render)
+# Configuração Global da API do Gemini
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 client = None
 
@@ -33,15 +30,7 @@ if GEMINI_API_KEY:
     client = genai.Client(api_key=GEMINI_API_KEY)
     print("🚀 Novo SDK do Gemini inicializado com sucesso!")
 else:
-    print("⚠️ AVISO: GEMINI_API_KEY não localizada.")
-
-# Inicialização limpa do modelo SpaCy
-try:
-    nlp = spacy.load("pt_core_news_sm")
-    print("🚀 IA do SpaCy carregada com sucesso a partir do ambiente!")
-except Exception as e:
-    print(f"❌ Erro ao carregar o SpaCy: {e}. Usando contingência.")
-    nlp = None
+    print("⚠️ AVISO: GEMINI_API_KEY não localizada nas variáveis de ambiente.")
 
 
 def obter_arquivo_usuario(numero_whatsapp):
@@ -53,107 +42,81 @@ def obter_arquivo_usuario(numero_whatsapp):
     return csv_usuario
 
 
-def analisar_tipo_fluxo(frase_lower):
-    ganhos = [
-        "recebi", "ganhei", "faturei", "fatura", "salario", "salário", "entrada", "ordenado", "recebido", "credito",
-        "ganado", "ingreso", "sueldo", "recibido", "earned", "received", "income", "salary", "deposit"
-    ]
-    if any(g in frase_lower for g in ganhos):
-        return "Entrada"
-    return "Saída"
+def inteligência_universal_gemini(texto_ou_transcricao):
+    """
+    Usa o Gemini como interpretador universal de idiomas para extrair dados financeiros.
+    Remove totalmente a necessidade de regex locais ou modelos rígidos do SpaCy.
+    """
+    if not client:
+        return "Saída", "", "Desconhecido", "Outros Gastos"
 
+    prompt = (
+        "Analise a seguinte frase sobre finanças (que pode estar em qualquer idioma): "
+        f'"{texto_ou_transcricao}"\n\n'
+        "Extraia os seguintes dados estruturados exatamente no formato JSON:\n"
+        "{\n"
+        '  "tipo": "Entrada" (se for ganho/salário/recebimento) ou "Saída" (se for gasto/despesa/compra),\n'
+        '  "valor": "apenas os números usando ponto como separador decimal (ex: 24.50)",\n'
+        '  "local": "Nome do local, estabelecimento ou origem do dinheiro capitalizado",\n'
+        '  "categoria": "Uma categoria adequada com emoji (ex: 🛒 Supermercado, 🍕 Lazer, 🏠 Contas Fixas, 🚗 Transporte, 💰 Ordenado/Ganhos, 📈 Extras)"\n'
+        "}\n"
+        "Retorne APENAS o JSON puro, sem marcações de markdown (como ```json) ou textos adicionais."
+    )
 
-def extrair_valor_universal(frase):
-    frase_limpa = re.sub(re.compile(r'[€$£¥₽د.إ]'), '', frase)
-    padrao = r'\b\d+(?:[.,]\d+)?\b'
-    numeros = re.findall(padrao, frase_limpa)
-    if numeros:
-        return numeros[0].replace(",", ".")
-    return ""
+    try:
+        resposta = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt
+        )
+        dados = json.loads(resposta.text.strip())
 
+        tipo = dados.get("tipo", "Saída")
+        valor = dados.get("valor", "")
+        local = dados.get("local", "Desconhecido")
+        categoria = dados.get("categoria", "Outros Gastos")
 
-def detetar_idioma_e_processar(frase):
-    frase_lower = frase.lower()
-    valor = extrair_valor_universal(frase)
-    local = ""
-
-    palavras_tempo = ["hoje", "ontem", "agora", "já", "hoy", "ayer", "today", "yesterday"]
-    palavras = frase.split()
-
-    if palavras:
-        if palavras[-1].lower().strip(".,!€$") in palavras_tempo and len(palavras) > 1:
-            local = palavras[-2].strip(".,!€$")
-        else:
-            local = palavras[-1].strip(".,!€$")
-
-    for marca in ["mercadona", "pingo doce", "continente", "mcdonalds", "uber", "carrefour", "auchan", "lidl"]:
-        if marca in frase_lower:
-            local = marca.capitalize()
-            break
-
-    tipo = analisar_tipo_fluxo(frase_lower)
-    categoria = "Outros Gastos"
-
-    if any(k in frase_lower for k in ["renda", "aluguel", "aluguer", "luz", "agua", "água", "internet"]):
-        categoria = "🏠 Contas Fixas"
-        if not local or local.lower() in palavras_tempo:
-            local = "Contas Fixas"
-
-    if tipo == "Entrada":
-        condicao_salario = ["salario", "salário", "ordenado", "recebi"]
-        categoria = "💰 Ordenado/Ganhos" if any(k in frase_lower for k in condicao_salario) else "📈 Faturação/Extras"
-    else:
-        if category := "🏠 Contas Fixas":
-            pass
-        if categoria == "Outros Gastos":
-            if any(k in frase_lower for k in ["mercadona", "continente", "pingo", "lidl", "carrefour", "auchan"]):
-                categoria = "🛒 Supermercado/Casa"
-            elif any(k in frase_lower for k in ["mcdonalds", "restaurante", "restaurant", "cafe", "café"]):
-                categoria = "🍕 Lazer/Alimentação Fora"
-            elif any(k in frase_lower for k in ["uber", "taxi", "galp", "bp", "gasolina"]):
-                categoria = "🚗 Transporte/Combustível"
-
-    return tipo, valor, local.strip().capitalize(), categoria
+        return tipo, valor, local, categoria
+    except Exception as e:
+        print(f"❌ Erro na análise inteligente do Gemini: {e}")
+        return "Saída", "", "Desconhecido", "Outros Gastos"
 
 
 def transcrever_audio_whatsapp(url_audio):
     if not client:
+        print("❌ Motor indisponível: Cliente Gemini offline.")
         return ""
-    
+
     arquivo_ogg = os.path.join(os.getcwd(), "audio_temp.ogg")
     arquivo_wav = os.path.join(os.getcwd(), "audio_temp.wav")
 
     try:
-        # Injeção global rigorosa do conversor binário FFmpeg local
-        import pydub
-        diretorio_atual = os.getcwd()
-        ffmpeg_local = os.path.join(diretorio_atual, "ffmpeg")
-        if os.path.exists(ffmpeg_local):
-            pydub.AudioSegment.converter = ffmpeg_local
-
+        # CORREÇÃO DO ERRO DO PRINT: Deixar o pydub encontrar o FFmpeg do sistema automaticamente
+        # Não forçamos mais caminhos locais relativos que não existem no Render
+        print("📥 Fazendo download do áudio do WhatsApp...")
         resposta = requests.get(url_audio)
         with open(arquivo_ogg, "wb") as f:
             f.write(resposta.content)
 
-        # Conversão via pydub utilizando o binário injetado
+        # Conversão utilizando os binários globais do sistema instalados pelos buildpacks
         audio = pydub.AudioSegment.from_file(arquivo_ogg, format="ogg")
         audio = audio.set_frame_rate(16000).set_channels(1)
         audio.export(arquivo_wav, format="wav")
 
-        # Upload estável usando o barramento de arquivos do novo SDK
+        print("🎙️ Fazendo upload do WAV para o Gemini...")
         audio_file_gemini = client.files.upload(file=arquivo_wav)
 
         resposta_gemini = client.models.generate_content(
             model="gemini-1.5-flash",
             contents=[
-                "Transcreva este arquivo de áudio exatamente como ele foi falado. "
-                "Retorne única e exclusivamente o texto transcrito puro, sem introduções ou explicações adicionais.",
+                "Transcreva este áudio exatamente na língua em que foi falado. "
+                "Retorne única e exclusivamente o texto transcrito puro.",
                 audio_file_gemini
             ]
         )
 
         texto_transcrito = resposta_gemini.text.strip()
-        
+        print(f"🎯 Transcrição universal concluída: {texto_transcrito}")
+
         try:
             client.files.delete(name=audio_file_gemini.name)
         except Exception:
@@ -162,7 +125,7 @@ def transcrever_audio_whatsapp(url_audio):
         return texto_transcrito
 
     except Exception as e:
-        print(f"❌ Erro crítico no motor de áudio: {e}")
+        print(f"❌ Falha crítica interna no processamento de áudio: {e}")
         return ""
     finally:
         for f_temp in [arquivo_ogg, arquivo_wav]:
@@ -182,23 +145,21 @@ def escanear_recibo_gemini(url_imagem):
         foto_gemini = client.files.upload(file=arquivo_img)
 
         prompt = (
-            "Analise este recibo ou nota de compra. Extraia o valor total gasto e o nome do estabelecimento local. "
-            "Formate a resposta estritamente em uma única linha no formato: 'Gastei VALOR no LOCAL'. "
-            "Exemplo de saída: Gastei 24.50 no Continente."
+            "Analise este recibo de forma universal. Transcreva o que foi gasto, "
+            "o valor total e o local em uma frase curta."
         )
 
         resposta_gemini = client.models.generate_content(
             model="gemini-1.5-flash",
             contents=[prompt, foto_gemini]
         )
-        resultado = resposta_gemini.text.strip()
 
         try:
             client.files.delete(name=foto_gemini.name)
         except Exception:
             pass
 
-        return resultado
+        return resposta_gemini.text.strip()
 
     except Exception as e:
         print(f"❌ Erro ao escanear nota fiscal: {e}")
@@ -229,7 +190,8 @@ def whatsapp_reply():
                 texto_recebido = escanear_recibo_gemini(url_midia)
 
     if texto_recebido:
-        tipo, v, l, c = detetar_idioma_e_processar(texto_recebido)
+        # Aqui entra o processamento universal baseado no Gemini (independente de idioma)
+        tipo, v, l, c = inteligência_universal_gemini(texto_recebido)
 
         if v and l:
             data_atual = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -237,17 +199,22 @@ def whatsapp_reply():
                 f.write(f"{data_atual},{tipo},{v},{l},{c}\n")
 
             if tipo == "Entrada":
-                msg.body(f"💰 *Vio:* Identifiquei uma Entrada! Transcrito: *\"{texto_recebido}\"* -> Salvo em *({c})*.")
+                msg.body(
+                    f"💰 *Vio:* Transcrito: *\"{texto_recebido}\"* -> Entrada de {v} em *({c})*.")
             else:
-                msg.body(f"✅ *Vio:* Despesa registrada! Transcrito: *\"{texto_recebido}\"* -> *{l}* em *({c})*.")
+                msg.body(
+                    f"✅ *Vio:* Transcrito: *\"{texto_recebido}\"* -> Despesa de {v} no {l} em *({c})*.")
         else:
-            msg.body(f"⚠️ *Vio:* Processado: \"{texto_recebido}\", mas não encontrei o valor e local explicitamente.")
+            msg.body(
+                f"⚠️ *Vio:* Entendi: \"{texto_recebido}\", mas não consegui extrair com precisão os valores.")
     else:
         if num_midias > 0:
             if "image" in tipo_midia:
-                msg.body("⚠️ *Vio:* Não consegui ler esta foto. Certifica-te de que o recibo está legível.")
+                msg.body(
+                    "⚠️ *Vio:* Não consegui ler esta foto. Certifique-se de que está legível.")
             else:
-                msg.body("⚠️ *Vio:* Recebi o teu áudio, mas o interpretador falhou. Por favor, digita ou repete o áudio.")
+                msg.body(
+                    "⚠️ *Vio:* Recebi o seu áudio, mas o interpretador falhou ao processar os arquivos de conversão.")
 
     return str(resposta_twilio)
 
