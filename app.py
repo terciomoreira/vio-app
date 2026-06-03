@@ -50,14 +50,14 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
         "{\n"
         '  "tipo": "Entrada" (se for ganho/salário/recebimento) ou "Saída" (se for gasto/despesa/compra),\n'
         '  "valor": "apenas os números usando ponto como separador decimal (ex: 24.50)",\n'
-        '  "local": "Nome do local, estabelecimento ou origem do dinheiro capitalizado",\n'
+        '  "local": "Nome do local, establishment ou origem do dinheiro capitalizado",\n'
         '  "categoria": "Uma categoria adequada com emoji (ex: 🛒 Supermercado, 🍕 Lazer, 🏠 Contas Fixas, 🚗 Transporte, 💰 Ordenado/Ganhos, 📈 Extras)"\n'
         "}"
     )
 
     try:
         model = genai.GenerativeModel(
-            "gemini-1.5-flash",
+            "gemini-1.5-flash-latest",
             generation_config={"response_mime_type": "application/json"}
         )
         resposta = model.generate_content(prompt)
@@ -95,12 +95,12 @@ def processar_midia_url(url_midia, mime_type):
             mime_type="audio/ogg" if eh_audio else "image/jpeg"
         )
 
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-1.5-flash-latest")
 
         if eh_audio:
             prompt = "Transcreva este áudio exatamente na língua em que foi falado. Retorne apenas o texto puro."
         else:
-            prompt = "Analise este recibo/nota fiscal. Transcreva o que foi gasto, o valor total e o local em uma frase corta."
+            prompt = "Analise este recibo/nota fiscal. Transcreva o que foi gasto, o valor total e o local em uma frase curta."
 
         resposta_gemini = model.generate_content([prompt, midia_gemini])
 
