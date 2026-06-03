@@ -2,18 +2,20 @@ import os
 import json
 from datetime import datetime
 import requests
-from flask import Flask, request
-from twilio.twiml.messaging_response import MessagingResponse
+from flask import Flask, request, jsonify
 
 # IMPORTAÇÃO LEVE: Pacote clássico e estável
 import google.generativeai as genai
 
 app = Flask(__name__)
 
-# Configurações Globais via Variáveis de Ambiente
+# Configurações Globais via Variáveis de Ambiente na Render
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
-TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
+EVOLUTION_API_URL = os.environ.get(
+    "EVOLUTION_API_URL")  # Ex: https://sua-api.com
+EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY")  # Token global da API
+# Nome da sua instância do WhatsApp
+INSTANCE_NAME = os.environ.get("INSTANCE_NAME")
 
 # Inicializa o ecossistema do Gemini
 if GEMINI_API_KEY:
@@ -23,8 +25,32 @@ else:
     print("⚠️ AVISO: GEMINI_API_KEY não localizada.")
 
 
-def obter_arquivo_usuario(numero_whatsapp):
-    id_usuario = numero_whatsapp.replace("whatsapp:", "").strip()
+def enviar_mensagem_evolution(numero, texto):
+    """Envia uma mensagem de texto de volta ao usuário usando a Evolution API"""
+    if not EVOLUTION_API_URL or not EVOLUTION_API_KEY or not INSTANCE_NAME:
+        print("⚠️ Configurações da Evolution API ausentes.")
+        return False
+
+    url = f"{EVOLUTION_API_URL.rstrip('/')}/message/sendText/{INSTANCE_NAME}"
+    headers = {
+        "apikey": EVOLUTION_API_KEY,
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "number": numero,
+        "text": texto,
+        "delay": 1200
+    }
+    try:
+        res = requests.post(url, json=payload, headers=headers)
+        return res.status_code in [200, 201]
+    except Exception as e:
+        print(f"❌ Erro ao enviar mensagem via Evolution: {e}")
+        return False
+
+
+def obter_arquivo_usuario(id_usuario):
+    # Na Render, a pasta /tmp funciona de forma persistente enquanto o container estiver ativo
     csv_usuario = f"/tmp/financeiro_{id_usuario}.csv"
     if not os.path.exists(csv_usuario):
         with open(csv_usuario, "w", encoding="utf-8") as f:
@@ -49,7 +75,6 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
     )
 
     try:
-        # Configura o modelo para responder estritamente em JSON nativo
         model = genai.GenerativeModel(
             "gemini-1.5-flash",
             generation_config={"response_mime_type": "application/json"}
@@ -68,146 +93,125 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
         return "Saída", "", "Desconhecido", "Outros Gastos"
 
 
-def transcrever_audio_whatsapp(url_audio):
+def processar_midia_url(url_midia, eh_audio=False):
+    """Baixa a mídia vinda do webhook da Evolution e envia para o Gemini"""
     if not GEMINI_API_KEY:
         return ""
 
-    arquivo_ogg = "/tmp/audio_temp.ogg"
+    ext = "ogg" if eh_audio else "jpg"
+    arquivo_temp = f"/tmp/temp_evolution_media.{ext}"
 
     try:
-        print("📥 Fazendo download autenticado do áudio do WhatsApp...")
-        if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
-            resposta = requests.get(url_audio, auth=(
-                TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
-        else:
-            resposta = requests.get(url_audio)
-
-        with open(arquivo_ogg, "wb") as f:
+        resposta = requests.get(url_midia)
+        with open(arquivo_temp, "wb") as f:
             f.write(resposta.content)
 
-        print("🎙️ Enviando áudio nativo ao Gemini via API Otimizada...")
-        audio_file_gemini = genai.upload_file(
-            path=arquivo_ogg, mime_type="audio/ogg")
+        midia_gemini = genai.upload_file(
+            path=arquivo_temp,
+            mime_type="audio/ogg" if eh_audio else "image/jpeg"
+        )
 
         model = genai.GenerativeModel("gemini-1.5-flash")
-        resposta_gemini = model.generate_content([
-            "Transcreva este áudio exatamente na língua em que foi falado de forma universal. Retorne apenas o texto puro, sem comentários.",
-            audio_file_gemini
-        ])
 
-        texto_transcrito = resposta_gemini.text.strip()
-        print(f"🎯 Transcrição concluída: {texto_transcrito}")
+        if eh_audio:
+            prompt = "Transcreva este áudio exatamente na língua em que foi falado. Retorne apenas o texto puro."
+        else:
+            prompt = "Analise este recibo/nota fiscal. Transcreva o que foi gasto, o valor total e o local em uma frase curta."
+
+        resposta_gemini = model.generate_content([prompt, midia_gemini])
 
         try:
-            genai.delete_file(name=audio_file_gemini.name)
+            genai.delete_file(name=midia_gemini.name)
         except Exception:
             pass
 
-        return texto_transcrito
+        return respuesta_gemini.text.strip()
     except Exception as e:
-        print(f"❌ Falha no processamento de áudio: {e}")
+        print(f"❌ Erro ao processar mídia da Evolution: {e}")
         return ""
     finally:
-        if os.path.exists(arquivo_ogg):
-            os.remove(arquivo_ogg)
+        if os.path.exists(arquivo_temp):
+            os.remove(arquivo_temp)
 
 
-def escanear_recibo_gemini(url_imagem):
-    if not GEMINI_API_KEY:
-        return ""
-    arquivo_img = "/tmp/temp_recibo.jpg"
-    try:
-        if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
-            resposta = requests.get(url_imagem, auth=(
-                TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
-        else:
-            resposta = requests.get(url_imagem)
+@app.route("/webhook", methods=["POST"])
+def evolution_webhook():
+    payload = request.get_json()
+    if not payload:
+        return jsonify({"status": "ignored", "reason": "No JSON payload"}), 200
 
-        with open(arquivo_img, "wb") as f:
-            f.write(resposta.content)
+    # Verifica o tipo de evento enviado pela Evolution API
+    event = payload.get("event")
+    if event != "messages.upsert":
+        return jsonify({"status": "ignored", "reason": "Not a message event"}), 200
 
-        foto_gemini = genai.upload_file(path=arquivo_img)
-        prompt = "Analise este recibo de forma universal. Transcreva o que foi gasto, o valor total e o local em uma frase curta."
+    data = payload.get("data", {})
+    key = data.get("key", {})
+    from_me = key.get("fromMe", False)
 
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        resposta_gemini = model.generate_content([prompt, foto_gemini])
+    # Ignora mensagens enviadas pelo próprio bot para não gerar loop infinito
+    if from_me:
+        return jsonify({"status": "ignored", "reason": "Message from self"}), 200
 
-        try:
-            genai.delete_file(name=foto_gemini.name)
-        except Exception:
-            pass
+    remetente = key.get("remoteJid", "")
+    message_content = data.get("message", {})
 
-        return resposta_gemini.text.strip()
-    except Exception as e:
-        print(f"❌ Erro ao escanear imagem: {e}")
-        return ""
-    finally:
-        if os.path.exists(arquivo_img):
-            os.remove(arquivo_img)
+    texto_recebido = ""
+    url_midia = ""
+    eh_audio = False
 
+    # Extração de Texto Puro
+    if "conversation" in message_content:
+        texto_recebido = message_content["conversation"]
+    elif "extendedTextMessage" in message_content:
+        texto_recebido = message_content["extendedTextMessage"].get("text", "")
 
-@app.route("/whatsapp", methods=["POST"])
-def whatsapp_reply():
-    remetente = request.values.get("From", "")
+    # Extração de Mídias (A Evolution envia a URL pronta ou em formato conversível)
+    # Nota: Dependendo da sua config da Evolution, se usar Object Storage (S3/Minio), a URL vem em 'mediaUrl'
+    elif "audioMessage" in message_content:
+        eh_audio = True
+        url_midia = data.get("mediaUrl", "")
+    elif "imageMessage" in message_content:
+        url_midia = data.get("mediaUrl", "")
 
-    texto_recebido = request.values.get("Body", "").strip()
-    num_midias = int(request.values.get("NumMedia", 0))
-    tipo_midia = request.values.get("MediaContentType0", "")
+    # Se houver mídia válida, faz o processamento no Gemini
+    if url_midia:
+        texto_recebido = processar_midia_url(url_midia, eh_audio=eh_audio)
 
-    resposta_twilio = MessagingResponse()
-    msg = resposta_twilio.message()
+    if texto_recebido:
+        tipo, v, l, c = inteligencia_universal_gemini(texto_recebido)
 
-    try:
-        if num_midias > 0:
-            url_midia = request.values.get("MediaUrl0", "")
-            if url_midia:
-                if "audio" in tipo_midia or "ogg" in url_midia or "audio/ogg" in tipo_midia:
-                    texto_recebido = transcrever_audio_whatsapp(url_midia)
-                elif "image" in tipo_midia:
-                    texto_recebido = escanear_recibo_gemini(url_midia)
+        if v:
+            if not l:
+                l = "Não especificado"
 
-        if texto_recebido:
-            tipo, v, l, c = inteligencia_universal_gemini(texto_recebido)
+            try:
+                csv_usuario = obter_arquivo_usuario(remetente.split("@")[0])
+                data_atual = datetime.now().strftime("%Y-%m-%d %H:%M")
+                with open(csv_usuario, "a", encoding="utf-8") as f:
+                    f.write(f"{data_atual},{tipo},{v},{l},{c}\n")
+            except Exception as e_file:
+                print(f"❌ Erro ao salvar arquivo: {e_file}")
 
-            # Se tiver valor, o bot processa. Local vazio vira "Não especificado"
-            if v:
-                if not l:
-                    l = "Não especificado"
-
-                # Tentativa de escrita segura num bloco try independente
-                try:
-                    csv_usuario = obter_arquivo_usuario(remetente)
-                    data_atual = datetime.now().strftime("%Y-%m-%d %H:%M")
-                    with open(csv_usuario, "a", encoding="utf-8") as f:
-                        f.write(f"{data_atual},{tipo},{v},{l},{c}\n")
-                except Exception as e_file:
-                    print(
-                        f"❌ Erro ao salvar arquivo (mas o bot vai responder): {e_file}")
-
-                if tipo == "Entrada":
-                    msg.body(
-                        f"💰 *Vio:* Entendi: *\"{texto_recebido}\"* -> Entrada de {v} em *({c})*.")
-                else:
-                    msg.body(
-                        f"✅ *Vio:* Entendi: *\"{texto_recebido}\"* -> Despesa de {v} no {l} em *({c})*.")
+            if tipo == "Entrada":
+                resposta_texto = f"💰 *Vio:* Entendi: *\"{texto_recebido}\"* -> Entrada de {v} em *({c})*."
             else:
-                msg.body(
-                    f"⚠️ *Vio:* Entendi: \"{texto_recebido}\", mas não consegui extrair os valores com precisão.")
+                resposta_texto = f"✅ *Vio:* Entendi: *\"{texto_recebido}\"* -> Despesa de {v} no {l} em *({c})*."
         else:
-            msg.body(
-                "⚠️ *Vio:* Recebi o seu arquivo de mídia, mas o download ou a interpretação do Vio falhou.")
+            resposta_texto = f"⚠️ *Vio:* Entendi: \"{texto_recebido}\", mas não consegui extrair os valores com precisão."
 
-    except Exception as e_geral:
-        # Garante resposta visual imediata no WhatsApp caso ocorra bug em tempo de execução
-        msg.body(f"❌ *Erro Interno do Bot:* {str(e_geral)}")
+        # Envia de volta para o usuário usando a API da Evolution
+        enviar_mensagem_evolution(remetente, resposta_texto)
 
-    return str(resposta_twilio)
+    return jsonify({"status": "success"}), 200
 
 
 @app.route("/")
 def index():
-    return "Bot Otimizado Vio Online e Operante na Vercel!"
+    return "Bot Vio Ativo e Operando de Forma Persistente na Render!"
 
 
 if __name__ == "__main__":
-    app.run(port=5000)
+    # A Render exige escuta na porta definida pela variável de ambiente PORT
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
