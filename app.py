@@ -2,20 +2,25 @@ import os
 import json
 from datetime import datetime
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request
+from twilio.twiml.messaging_response import MessagingResponse
+from twilio.rest import Client
 
-# IMPORTAÇÃO LEVE: Pacote clássico e estável
+# IMPORTAÇÃO DO GEMINI
 import google.generativeai as genai
 
 app = Flask(__name__)
 
 # Configurações Globais via Variáveis de Ambiente na Render
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-EVOLUTION_API_URL = os.environ.get(
-    "EVOLUTION_API_URL")  # Ex: https://sua-api.com
-EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY")  # Token global da API
-# Nome da sua instância do WhatsApp
-INSTANCE_NAME = os.environ.get("INSTANCE_NAME")
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
+TWILIO_NUMBER = os.environ.get("TWILIO_NUMBER")
+
+# Inicializa o Twilio Client se as chaves existirem
+twilio_client = None
+if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
+    twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
 # Inicializa o ecossistema do Gemini
 if GEMINI_API_KEY:
@@ -25,32 +30,8 @@ else:
     print("⚠️ AVISO: GEMINI_API_KEY não localizada.")
 
 
-def enviar_mensagem_evolution(numero, texto):
-    """Envia uma mensagem de texto de volta ao usuário usando a Evolution API"""
-    if not EVOLUTION_API_URL or not EVOLUTION_API_KEY or not INSTANCE_NAME:
-        print("⚠️ Configurações da Evolution API ausentes.")
-        return False
-
-    url = f"{EVOLUTION_API_URL.rstrip('/')}/message/sendText/{INSTANCE_NAME}"
-    headers = {
-        "apikey": EVOLUTION_API_KEY,
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "number": numero,
-        "text": texto,
-        "delay": 1200
-    }
-    try:
-        res = requests.post(url, json=payload, headers=headers)
-        return res.status_code in [200, 201]
-    except Exception as e:
-        print(f"❌ Erro ao enviar mensagem via Evolution: {e}")
-        return False
-
-
 def obter_arquivo_usuario(id_usuario):
-    # Na Render, a pasta /tmp funciona de forma persistente enquanto o container estiver ativo
+    # Pasta persistente na Render enquanto o container estiver ativo
     csv_usuario = f"/tmp/financeiro_{id_usuario}.csv"
     if not os.path.exists(csv_usuario):
         with open(csv_usuario, "w", encoding="utf-8") as f:
@@ -93,16 +74,19 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
         return "Saída", "", "Desconhecido", "Outros Gastos"
 
 
-def processar_midia_url(url_midia, eh_audio=False):
-    """Baixa a mídia vinda do webhook da Evolution e envia para o Gemini"""
+def processar_midia_url(url_midia, mime_type):
+    """Baixa a mídia vinda do webhook do Twilio usando autenticação básica e envia para o Gemini"""
     if not GEMINI_API_KEY:
         return ""
 
+    eh_audio = "audio" in mime_type
     ext = "ogg" if eh_audio else "jpg"
-    arquivo_temp = f"/tmp/temp_evolution_media.{ext}"
+    arquivo_temp = f"/tmp/temp_twilio_media.{ext}"
 
     try:
-        resposta = requests.get(url_midia)
+        # O Twilio exige as credenciais da conta para permitir o download dos arquivos de mídia
+        resposta = requests.get(url_midia, auth=(
+            TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
         with open(arquivo_temp, "wb") as f:
             f.write(resposta.content)
 
@@ -116,7 +100,7 @@ def processar_midia_url(url_midia, eh_audio=False):
         if eh_audio:
             prompt = "Transcreva este áudio exatamente na língua em que foi falado. Retorne apenas o texto puro."
         else:
-            prompt = "Analise este recibo/nota fiscal. Transcreva o que foi gasto, o valor total e o local em uma frase curta."
+            prompt = "Analise este recibo/nota fiscal. Transcreva o que foi gasto, o valor total e o local em uma frase corta."
 
         resposta_gemini = model.generate_content([prompt, midia_gemini])
 
@@ -127,7 +111,7 @@ def processar_midia_url(url_midia, eh_audio=False):
 
         return respuesta_gemini.text.strip()
     except Exception as e:
-        print(f"❌ Erro ao processar mídia da Evolution: {e}")
+        print(f"❌ Erro ao processar mídia da Twilio: {e}")
         return ""
     finally:
         if os.path.exists(arquivo_temp):
@@ -135,58 +119,33 @@ def processar_midia_url(url_midia, eh_audio=False):
 
 
 @app.route("/webhook", methods=["POST"])
-def evolution_webhook():
-    payload = request.get_json()
-    if not payload:
-        return jsonify({"status": "ignored", "reason": "No JSON payload"}), 200
+def twilio_webhook():
+    # O Twilio envia dados como formulário HTTP (Form Data) e não JSON
+    remetente = request.values.get("From", "")  # Ex: whatsapp:+5511999999999
+    texto_recebido = request.values.get("Body", "").strip()
+    url_midia = request.values.get("MediaUrl0", "")
+    mime_type = request.values.get("MediaContentType0", "")
 
-    # Verifica o tipo de evento enviado pela Evolution API
-    event = payload.get("event")
-    if event != "messages.upsert":
-        return jsonify({"status": "ignored", "reason": "Not a message event"}), 200
+    # Identifica o ID único do usuário a partir do número de telefone
+    id_usuario = remetente.replace("whatsapp:", "").strip()
 
-    data = payload.get("data", {})
-    key = data.get("key", {})
-    from_me = key.get("fromMe", False)
-
-    # Ignora mensagens enviadas pelo próprio bot para não gerar loop infinito
-    if from_me:
-        return jsonify({"status": "ignored", "reason": "Message from self"}), 200
-
-    remetente = key.get("remoteJid", "")
-    message_content = data.get("message", {})
-
-    texto_recebido = ""
-    url_midia = ""
-    eh_audio = False
-
-    # Extração de Texto Puro
-    if "conversation" in message_content:
-        texto_recebido = message_content["conversation"]
-    elif "extendedTextMessage" in message_content:
-        texto_recebido = message_content["extendedTextMessage"].get("text", "")
-
-    # Extração de Mídias (A Evolution envia a URL pronta ou em formato conversível)
-    # Nota: Dependendo da sua config da Evolution, se usar Object Storage (S3/Minio), a URL vem em 'mediaUrl'
-    elif "audioMessage" in message_content:
-        eh_audio = True
-        url_midia = data.get("mediaUrl", "")
-    elif "imageMessage" in message_content:
-        url_midia = data.get("mediaUrl", "")
-
-    # Se houver mídia válida, faz o processamento no Gemini
+    # Se houver arquivo de mídia válido (Foto ou Áudio) enviado pelo usuário
     if url_midia:
-        texto_recebido = processar_midia_url(url_midia, eh_audio=eh_audio)
+        texto_transcrito = processar_midia_url(url_midia, mime_type)
+        if texto_transcrito:
+            texto_recebido = texto_transcrito
+
+    resposta_texto = ""
 
     if texto_recebido:
         tipo, v, l, c = inteligencia_universal_gemini(texto_recebido)
 
         if v:
-            if not l:
+            if not l or l.lower() == "desconhecido":
                 l = "Não especificado"
 
             try:
-                csv_usuario = obter_arquivo_usuario(remetente.split("@")[0])
+                csv_usuario = obter_arquivo_usuario(id_usuario)
                 data_atual = datetime.now().strftime("%Y-%m-%d %H:%M")
                 with open(csv_usuario, "a", encoding="utf-8") as f:
                     f.write(f"{data_atual},{tipo},{v},{l},{c}\n")
@@ -199,19 +158,20 @@ def evolution_webhook():
                 resposta_texto = f"✅ *Vio:* Entendi: *\"{texto_recebido}\"* -> Despesa de {v} no {l} em *({c})*."
         else:
             resposta_texto = f"⚠️ *Vio:* Entendi: \"{texto_recebido}\", mas não consegui extrair os valores com precisão."
+    else:
+        resposta_texto = "⚠️ *Vio:* Recebi a tua mensagem, mas não consegui extrair nenhum conteúdo legível."
 
-        # Envia de volta para o usuário usando a API da Evolution
-        enviar_mensagem_evolution(remetente, resposta_texto)
-
-    return jsonify({"status": "success"}), 200
+    # Prepara a resposta síncrona exigida pelo protocolo TwiML do Twilio
+    twiml_resp = MessagingResponse()
+    twiml_resp.message(resposta_texto)
+    return str(twiml_resp)
 
 
 @app.route("/")
 def index():
-    return "Bot Vio Ativo e Operando de Forma Persistente na Render!"
+    return "Bot Vio Ativo e Operando via Twilio na Render!"
 
 
 if __name__ == "__main__":
-    # A Render exige escuta na porta definida pela variável de ambiente PORT
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
