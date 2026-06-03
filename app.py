@@ -6,8 +6,9 @@ from flask import Flask, request
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client
 
-# IMPORTAÇÃO DO GEMINI
-import google.generativeai as genai
+# NOVA IMPORTAÇÃO OFICIAL DO GEMINI
+from google import genai
+from google.genai import types
 
 app = Flask(__name__)
 
@@ -22,16 +23,16 @@ twilio_client = None
 if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
     twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
-# Inicializa o ecossistema do Gemini
+# Inicializa o cliente oficial do Gemini
+ai_client = None
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    print("🚀 API do Gemini configurada com sucesso!")
+    ai_client = genai.Client(api_key=GEMINI_API_KEY)
+    print("🚀 Nova API do Gemini configurada com sucesso!")
 else:
     print("⚠️ AVISO: GEMINI_API_KEY não localizada.")
 
 
 def obter_arquivo_usuario(id_usuario):
-    # Pasta persistente na Render enquanto o container estiver ativo
     csv_usuario = f"/tmp/financeiro_{id_usuario}.csv"
     if not os.path.exists(csv_usuario):
         with open(csv_usuario, "w", encoding="utf-8") as f:
@@ -40,7 +41,7 @@ def obter_arquivo_usuario(id_usuario):
 
 
 def inteligencia_universal_gemini(texto_ou_transcricao):
-    if not GEMINI_API_KEY:
+    if not ai_client:
         return "Saída", "", "Desconhecido", "Outros Gastos"
 
     prompt = (
@@ -50,17 +51,20 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
         "{\n"
         '  "tipo": "Entrada" (se for ganho/salário/recebimento) ou "Saída" (se for gasto/despesa/compra),\n'
         '  "valor": "apenas os números usando ponto como separador decimal (ex: 24.50)",\n'
-        '  "local": "Nome do local, establishment ou origem do dinheiro capitalizado",\n'
+        '  "local": "Nome do local, estabelecimento ou origem do dinheiro capitalizado",\n'
         '  "categoria": "Uma categoria adequada com emoji (ex: 🛒 Supermercado, 🍕 Lazer, 🏠 Contas Fixas, 🚗 Transporte, 💰 Ordenado/Ganhos, 📈 Extras)"\n'
         "}"
     )
 
     try:
-        model = genai.GenerativeModel(
-            "gemini-1.5-flash-latest",
-            generation_config={"response_mime_type": "application/json"}
+        # Nova chamada oficial utilizando a SDK moderna
+        resposta = ai_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json"
+            ),
         )
-        resposta = model.generate_content(prompt)
         dados = json.loads(resposta.text.strip())
 
         return (
@@ -76,7 +80,7 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
 
 def processar_midia_url(url_midia, mime_type):
     """Baixa a mídia vinda do webhook do Twilio usando autenticação básica e envia para o Gemini"""
-    if not GEMINI_API_KEY:
+    if not ai_client:
         return ""
 
     eh_audio = "audio" in mime_type
@@ -84,28 +88,26 @@ def processar_midia_url(url_midia, mime_type):
     arquivo_temp = f"/tmp/temp_twilio_media.{ext}"
 
     try:
-        # O Twilio exige as credenciais da conta para permitir o download dos arquivos de mídia
         resposta = requests.get(url_midia, auth=(
             TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
         with open(arquivo_temp, "wb") as f:
             f.write(resposta.content)
 
-        midia_gemini = genai.upload_file(
-            path=arquivo_temp,
-            mime_type="audio/ogg" if eh_audio else "image/jpeg"
-        )
-
-        model = genai.GenerativeModel("gemini-1.5-flash-latest")
+        # Upload utilizando o novo gerenciador de arquivos da SDK estável
+        midia_gemini = ai_client.files.upload(file=arquivo_temp)
 
         if eh_audio:
             prompt = "Transcreva este áudio exatamente na língua em que foi falado. Retorne apenas o texto puro."
         else:
             prompt = "Analise este recibo/nota fiscal. Transcreva o que foi gasto, o valor total e o local em uma frase curta."
 
-        resposta_gemini = model.generate_content([prompt, midia_gemini])
+        resposta_gemini = ai_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[midia_gemini, prompt]
+        )
 
         try:
-            genai.delete_file(name=midia_gemini.name)
+            ai_client.files.delete(name=midia_gemini.name)
         except Exception:
             pass
 
@@ -120,16 +122,13 @@ def processar_midia_url(url_midia, mime_type):
 
 @app.route("/webhook", methods=["POST"])
 def twilio_webhook():
-    # O Twilio envia dados como formulário HTTP (Form Data) e não JSON
-    remetente = request.values.get("From", "")  # Ex: whatsapp:+5511999999999
+    remetente = request.values.get("From", "")
     texto_recebido = request.values.get("Body", "").strip()
     url_midia = request.values.get("MediaUrl0", "")
     mime_type = request.values.get("MediaContentType0", "")
 
-    # Identifica o ID único do usuário a partir do número de telefone
     id_usuario = remetente.replace("whatsapp:", "").strip()
 
-    # Se houver arquivo de mídia válido (Foto ou Áudio) enviado pelo usuário
     if url_midia:
         texto_transcrito = processar_midia_url(url_midia, mime_type)
         if texto_transcrito:
@@ -161,7 +160,6 @@ def twilio_webhook():
     else:
         resposta_texto = "⚠️ *Vio:* Recebi a tua mensagem, mas não consegui extrair nenhum conteúdo legível."
 
-    # Prepara a resposta síncrona exigida pelo protocolo TwiML do Twilio
     twiml_resp = MessagingResponse()
     twiml_resp.message(resposta_texto)
     return str(twiml_resp)
