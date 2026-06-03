@@ -101,6 +101,7 @@ def processar_midia_url(url_midia, mime_type):
         else:
             prompt = "Analise este recibo/nota fiscal. Transcreva o que foi gasto, o valor total e o local em uma frase curta."
 
+        # Chamada corrigida usando ai_client com a variável resposta_gemini perfeitamente mapeada
         resposta_gemini = ai_client.models.generate_content(
             model="gemini-2.5-flash",
             contents=[midia_gemini, prompt]
