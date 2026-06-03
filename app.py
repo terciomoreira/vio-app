@@ -99,9 +99,9 @@ def processar_midia_url(url_midia, mime_type):
         if eh_audio:
             prompt = "Transcreva este áudio exatamente na língua em que foi falado. Retorne apenas o texto puro."
         else:
-            prompt = "Analise este recibo/nota fiscal. Transcreva o que foi gasto, o valor total e o local em uma frase curta."
+            prompt = "Analise este recibo/nota fiscal. Transcreva o que foi gasto, o valor total e o local em uma frase corta."
 
-        # Chamada corrigida usando ai_client com a variável resposta_gemini perfeitamente mapeada
+        # Aqui definimos como 'resposta_gemini' (com O)
         resposta_gemini = ai_client.models.generate_content(
             model="gemini-2.5-flash",
             contents=[midia_gemini, prompt]
@@ -112,7 +112,8 @@ def processar_midia_url(url_midia, mime_type):
         except Exception:
             pass
 
-        return respuesta_gemini.text.strip()
+        # CORREÇÃO AQUI: Agora retorna 'resposta_gemini' corretamente!
+        return resposta_gemini.text.strip()
     except Exception as e:
         print(f"❌ Erro ao processar mídia da Twilio: {e}")
         return ""
