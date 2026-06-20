@@ -225,8 +225,9 @@ def twilio_webhook():
     # ==========================================
     # COMANDO DE RESUMO PARA O CONTADOR
     # ==========================================
-    palavra_chave = texto_recebido.lower().strip()
-    if palabra_chave in ["resumo", "relatorio", "relatório", "contador"]:
+    palavra_chave = str(texto_recebido).strip().lower()
+
+    if palavra_chave in ["resumo", "relatorio", "relatório", "contador"]:
         conn = obter_conexao_banco()
         if conn:
             try:
@@ -238,6 +239,7 @@ def twilio_webhook():
                     GROUP BY categoria 
                     ORDER BY SUM(valor) DESC;
                 """, (id_usuario,))
+
                 linhas = cursor.fetchall()
                 cursor.close()
                 conn.close()
@@ -246,7 +248,8 @@ def twilio_webhook():
                     resposta_texto = "📊 *Vio: Aqui está o teu Resumo Financeiro!*\n\n"
                     total_geral = 0
                     for cat, val in linhas:
-                        resposta_texto += f"{cat}: *{val:.2f} €*\n"
+                        categoria_nome = cat if cat else "Outros/Não Categorizado"
+                        resposta_texto += f"• {categoria_nome}: *{val:.2f} €*\n"
                         total_geral += val
                     resposta_texto += f"\n💰 *Total acumulado de Saídas:* *{total_geral:.2f} €*"
                     resposta_texto += "\n\n📄 _O arquivo completo em Excel foi consolidado para o teu Contador!_"
@@ -260,8 +263,10 @@ def twilio_webhook():
         twiml_resp = MessagingResponse()
         twiml_resp.message(resposta_texto)
         return str(twiml_resp)
-    # ==========================================
 
+    # ==========================================
+    # CONTINUAÇÃO DO FLUXO NORMAL (SE NÃO FOR COMANDO)
+    # ==========================================
     if url_midia:
         texto_transcrito = processar_midia_url(url_midia, mime_type)
         if texto_transcrito:
