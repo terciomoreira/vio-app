@@ -111,12 +111,17 @@ def obter_arquivo_usuario(id_usuario):
 
 
 def verificar_se_e_comando_resumo(texto):
-    if not ai_client or not texto:
+    if not texto:
         return False
 
     palavra_limpa = texto.strip().lower()
+    # 1. VALIDAÇÃO LOCAL DIRETA (Não gasta IA, não trava se estiver sem saldo)
     if palavra_limpa in ["resumo", "relatorio", "relatório", "contador", "summary"]:
         return True
+
+    # 2. Se a IA estiver offline ou sem quota, nem tenta chamá-la para não dar timeout
+    if not ai_client:
+        return False
 
     prompt = (
         "Atue como um classificador de intenção linguística de alta precisão.\n"
@@ -142,7 +147,7 @@ def verificar_se_e_comando_resumo(texto):
         return dados.get("e_resumo", False)
     except Exception as e:
         print(f"⚠️ Erro na classificação do comando: {e}")
-        return palavra_limpa in ["resumo", "relatorio", "relatório", "contador", "summary"]
+        return False
 
 
 def inteligencia_universal_gemini(texto_ou_transcricao):
@@ -152,12 +157,12 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
     prompt = (
         "Atue como um analista financeiro de alta precisão. Extraia os dados estruturados da mensagem do usuário fornecida abaixo.\n"
         "Identifique o tipo (Entrada se for ganho/salário, Saída se for gasto/compra), o valor numérico (use ponto como decimal), "
-        "o local/estabelecimento e atribua uma categoria com um emoji adequado.\n\n"
+        "o local/estabelecimento and atribua uma categoria com um emoji adequado.\n\n"
         f"Mensagem do usuário: \"{texto_ou_transcricao}\"\n\n"
         "Formatos JSON estrito exigido:\n"
         "{\n"
         '  "tipo": "Entrada" ou "Saída",\n'
-        '  "valor": "apenas números (ex: 1.30)",\n'
+        '  "valor": "apenas numbers (ex: 1.30)",\n'
         '  "local": "Nome do estabelecimento",\n'
         '  "categoria": "Emoji + Nome da Categoria"\n'
         "}"
@@ -330,6 +335,7 @@ def twilio_webhook():
         else:
             resposta_texto = "⚠️ *Vio:* O banco de dados está temporariamente inacessível."
 
+        # CORREÇÃO: Garante o encerramento limpo do bloco caso entre nas exceções de banco
         twiml_resp = MessagingResponse()
         twiml_resp.message(resposta_texto)
         return str(twiml_resp)
