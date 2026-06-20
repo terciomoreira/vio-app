@@ -114,14 +114,17 @@ def verificar_se_e_comando_resumo(texto):
     if not ai_client or not texto:
         return False
 
-    # CORRIGIDO: Injeção explícita da variável de texto recebida do usuário no prompt
+    palavra_limpa = texto.strip().lower()
+    # Atalho direto de hardware/performance: se for estritamente estas palavras, nem gasta API
+    if palavra_limpa in ["resumo", "relatorio", "relatório", "contador", "summary"]:
+        return True
+
     prompt = (
         "Atue como um classificador de intenção linguística de alta precisão.\n"
-        "Analise estritamente a mensagem enviada pelo usuário abaixo e determine se ele está explicitamente "
-        "solicitando um resumo, relatório, extrato, balanço, ver os gastos ou consolidação de finanças (em qualquer idioma do mundo).\n"
-        "Se for uma mensagem registrando um gasto novo (ex: 'Gastei 10', 'Almoço 35', 'Uber 12€'), responda obrigatoriamente FALSE.\n\n"
+        "Analise a mensagem enviada pelo usuário e determine se ele está solicitando um resumo, relatório, extrato ou balanço de finanças.\n"
+        "Se for um lançamento de despesa comum, responda obrigatoriamente false.\n\n"
         f"Mensagem do usuário: \"{texto}\"\n\n"
-        "Responda única e exclusivamente com um JSON no seguinte formato, sem formatações markdown:\n"
+        "Responda estritamente com um JSON no seguinte formato:\n"
         "{\n"
         '  "e_resumo": true ou false\n'
         "}"
@@ -134,34 +137,26 @@ def verificar_se_e_comando_resumo(texto):
                 response_mime_type="application/json"
             ),
         )
-        # Limpeza preventiva contra blocos de código markdown na resposta da IA
         texto_limpo = resposta.text.strip().replace(
             "```json", "").replace("```", "").strip()
         dados = json.loads(texto_limpo)
         return dados.get("e_resumo", False)
     except Exception as e:
         print(f"⚠️ Erro na classificação do comando: {e}")
-        # Fallback de segurança multilíngue robusto caso a IA falhe
-        palavra_limpa = texto.strip().lower()
-        comandos_globais = ["resumo", "relatorio", "relatório", "contador",
-                            "summary", "report", "extract", "extrato", "отчет", "概要"]
-        return any(cmd in palabra_limpa for cmd in comandos_globais)
+        return palavra_limpa in ["resumo", "relatorio", "relatório", "contador", "summary"]
 
 
 def inteligencia_universal_gemini(texto_ou_transcricao):
-    if not ai_client:
+    if not ai_client or not texto_ou_transcricao:
         return "Saída", "", "Desconhecido", "Outros Gastos"
 
+    # CORRIGIDO: Agora injetamos a variável texto_ou_transcricao de forma explícita para a IA ler!
     prompt = (
-        "Atue como um analista financeiro de alta precisão especializado em ler mensagens de usuários, "
-        "notificações automáticas de smartphones e SMS bancários.\n\n"
-        f'Texto recebido: "{texto_ou_transcricao}"\n\n'
-        "Instruções cruciais de análise:\n"
-        "1. Identifique se o texto descreve uma ENTRADA ou uma SAÍDA.\n"
-        "2. Extraia o VALOR exato. Use sempre o ponto '.' como separador decimal.\n"
-        "3. Identifique o LOCAL ou estabelecimento.\n"
-        "4. Atribua uma CATEGORIA com emoji condizente.\n\n"
-        "Extraia os dados estruturados exatamente no formato JSON abaixo, sem blocos markdown:\n"
+        "Atue como um analista financeiro de alta precisão. Extraia os dados estruturados da mensagem do usuário fornecida abaixo.\n"
+        "Identifique o tipo (Entrada se for ganho/salário, Saída se for gasto/compra), o valor numérico (use ponto como decimal), "
+        "o local/estabelecimento e atribua uma categoria com um emoji adequado.\n\n"
+        f"Mensagem do usuário: \"{texto_ou_transcricao}\"\n\n"
+        "Formatos JSON estrito exigido:\n"
         "{\n"
         '  "tipo": "Entrada" ou "Saída",\n'
         '  "valor": "apenas números (ex: 1.30)",\n'
@@ -180,6 +175,7 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
         texto_limpo = resposta.text.strip().replace(
             "```json", "").replace("```", "").strip()
         dados = json.loads(texto_limpo)
+
         return (
             dados.get("tipo", "Saída"),
             dados.get("valor", ""),
@@ -188,7 +184,11 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
         )
     except Exception as e:
         print(f"❌ Erro na análise do Gemini: {e}")
-        return "Saída", "", "Desconhecido", "Outros Gastos"
+        # FALLBACK MANUAL DE EMERGÊNCIA: Tenta extrair número via código simples se a IA falhar
+        import re
+        valores = re.findall(r"\d+(??:[.,]\d+)?", texto_ou_transcricao)
+        valor_descoberto = valores[0].replace(",", ".") if valores else ""
+        return "Saída", valor_descoberto, "Não especificado", "🛒 Outros Gastos"
 
 
 def processar_midia_url(url_midia, mime_type):
@@ -203,7 +203,7 @@ def processar_midia_url(url_midia, mime_type):
         with open(arquivo_temp, "wb") as f:
             f.write(resposta.content)
         midia_gemini = ai_client.files.upload(file=arquivo_temp)
-        prompt = "Transcreva este áudio exatamente na língua em que foi falado." if eh_audio else "Analise este recibo/nota fiscal. Transcreva o que foi gasto, o valor total e o local."
+        prompt = "Transcreva este áudio." if eh_audio else "Analise este recibo."
         resposta_gemini = ai_client.models.generate_content(
             model="gemini-2.5-flash",
             contents=[midia_gemini, prompt]
@@ -263,7 +263,7 @@ def download_relatorio(id_usuario):
 
 
 # ==========================================
-#  WEBHOOK DO TWILIO (MECANISMO DE FLUXO)
+#  WEBHOOK DO TWILIO
 # ==========================================
 
 @app.route("/webhook", methods=["POST"])
@@ -280,7 +280,7 @@ def twilio_webhook():
         if texto_transcrito:
             texto_recebido = texto_transcrito
 
-    # INTERCEPTOR: COMANDO DE RESUMO MULTILÍNGUE GLOBAL
+    # INTERCEPTOR: COMANDO DE RESUMO
     if texto_recebido and verificar_se_e_comando_resumo(texto_recebido):
         conn = obter_conexao_banco()
         if conn:
@@ -334,7 +334,7 @@ def twilio_webhook():
         twiml_resp.message(resposta_texto)
         return str(twiml_resp)
 
-    # FLUXO NORMAL: PROCESSAMENTO E SALVAMENTO DE LANÇAMENTOS
+    # FLUXO NORMAL: PROCESSAMENTO DE LANÇAMENTOS
     resposta_texto = ""
     if texto_recebido:
         tipo, v, l, c = inteligencia_universal_gemini(texto_recebido)
