@@ -3,3 +3,4 @@ twilio
 requests
 gunicorn
 google-genai
+psycopg2-binary
