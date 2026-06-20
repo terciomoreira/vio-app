@@ -73,7 +73,7 @@ def verificar_e_registrar_usuario(id_whatsapp):
         return False
 
 
-def salvar_transacao_banco(id_whatsapp, tipo, valor, local, categoria, texto_puro):
+def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro):
     id_limpo = str(id_whatsapp).replace("whatsapp:", "").strip()
     verificar_e_registrar_usuario(id_limpo)
 
@@ -86,7 +86,7 @@ def salvar_transacao_banco(id_whatsapp, tipo, valor, local, categoria, texto_pur
         cursor.execute(
             """INSERT INTO transacoes (id_whatsapp, tipo, valor, local, categoria, texto_puro)
                VALUES (%s, %s, %s, %s, %s, %s);""",
-            (id_limpo, tipo, valor_numerico, local, categoria, texto_puro)
+            (id_limpo, tipo, valor_numerico, local, category, texto_puro)
         )
         conn.commit()
         cursor.close()
@@ -115,7 +115,6 @@ def verificar_se_e_comando_resumo(texto):
         return False
 
     palavra_limpa = texto.strip().lower()
-    # Atalho direto de hardware/performance: se for estritamente estas palavras, nem gasta API
     if palavra_limpa in ["resumo", "relatorio", "relatório", "contador", "summary"]:
         return True
 
@@ -150,7 +149,6 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
     if not ai_client or not texto_ou_transcricao:
         return "Saída", "", "Desconhecido", "Outros Gastos"
 
-    # CORRIGIDO: Agora injetamos a variável texto_ou_transcricao de forma explícita para a IA ler!
     prompt = (
         "Atue como um analista financeiro de alta precisão. Extraia os dados estruturados da mensagem do usuário fornecida abaixo.\n"
         "Identifique o tipo (Entrada se for ganho/salário, Saída se for gasto/compra), o valor numérico (use ponto como decimal), "
@@ -184,9 +182,8 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
         )
     except Exception as e:
         print(f"❌ Erro na análise do Gemini: {e}")
-        # FALLBACK MANUAL DE EMERGÊNCIA: Tenta extrair número via código simples se a IA falhar
         import re
-        valores = re.findall(r"\d+(??:[.,]\d+)?", texto_ou_transcricao)
+        valores = re.findall(r"\d+(?:[.,]\d+)?", texto_ou_transcricao)
         valor_descoberto = valores[0].replace(",", ".") if valores else ""
         return "Saída", valor_descoberto, "Não especificado", "🛒 Outros Gastos"
 
@@ -268,10 +265,13 @@ def download_relatorio(id_usuario):
 
 @app.route("/webhook", methods=["POST"])
 def twilio_webhook():
-    remetente = request.values.get("From", "")
-    texto_recebido = request.values.get("Body", "").strip()
-    url_midia = request.values.get("MediaUrl0", "")
-    mime_type = request.values.get("MediaContentType0", "")
+    remetente = request.form.get("From", "")
+    texto_recebido = request.form.get("Body", "")
+    url_midia = request.form.get("MediaUrl0", "")
+    mime_type = request.form.get("MediaContentType0", "")
+
+    if texto_recebido:
+        texto_recebido = str(texto_recebido).strip()
 
     id_usuario = remetente.replace("whatsapp:", "").replace("+", "").strip()
 
@@ -337,14 +337,21 @@ def twilio_webhook():
     # FLUXO NORMAL: PROCESSAMENTO DE LANÇAMENTOS
     resposta_texto = ""
     if texto_recebido:
-        tipo, v, l, c = inteligencia_universal_gemini(texto_recebido)
+        try:
+            tipo, v, l, c = inteligencia_universal_gemini(texto_recebido)
+        except Exception as e_gemini:
+            print(f"⚠️ Falha na IA, aplicando Fallback manual: {e_gemini}")
+            import re
+            valores = re.findall(r"\d+(?:[.,]\d+)?", texto_recebido)
+            v = valores[0].replace(",", ".") if valores else ""
+            tipo, l, c = "Saída", "Não especificado", "🛒 Outros Gastos"
 
         if v:
             if not l or l.lower() == "desconhecido":
                 l = "Não especificado"
 
             gravou_no_banco = salvar_transacao_banco(
-                id_whatsapp=id_usuario, tipo=tipo, valor=v, local=l, categoria=c, texto_puro=texto_recebido
+                id_whatsapp=id_usuario, tipo=tipo, valor=v, local=l, category=c, texto_puro=texto_recebido
             )
 
             if not gravou_no_banco:
