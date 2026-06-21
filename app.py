@@ -36,7 +36,7 @@ else:
 
 
 # ==========================================
-#  FUNÇÕES DE SUPORTE AO BANCO DE DADOS
+#  FUNÇÕES DE SUPORTE AO BANCO DE DADOS (OTIMIZADAS)
 # ==========================================
 
 def obter_conexao_banco():
@@ -54,76 +54,82 @@ def obter_conexao_banco():
 
 
 def verificar_e_registrar_usuario(id_whatsapp):
+    id_limpo = str(id_whatsapp).replace("whatsapp:", "").strip()
     conn = obter_conexao_banco()
     if not conn:
         return False
     try:
-        cursor = conn.cursor()
-        id_limpo = str(id_whatsapp).replace("whatsapp:", "").strip()
-        # Modificado para garantir que novos usuários ganham 7 dias grátis por padrão na tabela
-        cursor.execute(
-            """INSERT INTO usuarios (id_whatsapp, plano_ativo, data_validade) 
-               VALUES (%s, TRUE, CURRENT_TIMESTAMP + INTERVAL '7 days') 
-               ON CONFLICT (id_whatsapp) DO NOTHING;""",
-            (id_limpo,)
-        )
-        conn.commit()
-        cursor.close()
-        conn.close()
+        # Uso do 'with' garante fechamento automático do cursor e commit/rollback seguro
+        with conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO usuarios (id_whatsapp, plano_ativo, data_validade) 
+                       VALUES (%s, TRUE, CURRENT_TIMESTAMP + INTERVAL '7 days') 
+                       ON CONFLICT (id_whatsapp) DO NOTHING;""",
+                    (id_limpo,)
+                )
         return True
     except Exception as e:
         print(f"❌ Erro ao registar utilizador no banco: {e}")
         return False
+    finally:
+        conn.close()
 
 
 def verificar_assinatura_ativa(id_whatsapp):
     """Verifica se o usuário tem o plano ativo e se está dentro da validade."""
+    id_limpo = str(id_whatsapp).replace("whatsapp:", "").strip()
     conn = obter_conexao_banco()
     if not conn:
-        return True  # Se o banco falhar, deixa passar para não travar os teus testes
+        return True  # Se o banco falhar, deixa passar para não travar os testes
     try:
-        cursor = conn.cursor()
-        id_limpo = str(id_whatsapp).replace("whatsapp:", "").strip()
-        cursor.execute(
-            "SELECT plano_ativo, data_validade FROM usuarios WHERE id_whatsapp = %s;", (id_limpo,))
-        resultado = cursor.fetchone()
-        cursor.close()
-        conn.close()
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT plano_ativo, data_validade FROM usuarios WHERE id_whatsapp = %s;", (id_limpo,))
+            resultado = cursor.fetchone()
 
-        if resultado:
-            ativo, validade = resultado
-            # Se o plano foi desativado ou a data de validade já passou
-            if not ativo or (validade and datetime.now() > validade):
-                return False
-        return True
+            if resultado:
+                ativo, validade = resultado
+                if not ativo or (validade and datetime.now() > validade):
+                    return False
+            return True
     except Exception as e:
         print(f"⚠️ Erro ao verificar assinatura: {e}")
         return True
+    finally:
+        conn.close()
 
 
 def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro):
     id_limpo = str(id_whatsapp).replace("whatsapp:", "").strip()
     verificar_e_registrar_usuario(id_limpo)
 
+    # PROTEÇÃO: Evita quebra do float se o valor vier corrompido, vazio ou em formato texto
+    try:
+        valor_numerico = float(valor) if valor else 0.0
+    except (ValueError, TypeError):
+        print(
+            f"⚠️ Aviso: Valor '{valor}' inválido recebido. Convertido para 0.0 para evitar quebra.")
+        valor_numerico = 0.0
+
     conn = obter_conexao_banco()
     if not conn:
         return False
     try:
-        valor_numerico = float(valor)
-        cursor = conn.cursor()
-        cursor.execute(
-            """INSERT INTO transacoes (id_whatsapp, tipo, valor, local, categoria, texto_puro)
-               VALUES (%s, %s, %s, %s, %s, %s);""",
-            (id_limpo, tipo, valor_numerico, local, category, texto_puro)
-        )
-        conn.commit()
-        cursor.close()
-        conn.close()
+        with conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """INSERT INTO transacoes (id_whatsapp, tipo, valor, local, categoria, texto_puro)
+                       VALUES (%s, %s, %s, %s, %s, %s);""",
+                    (id_limpo, tipo, valor_numerico, local, category, texto_puro)
+                )
         print("💾 Gravado com sucesso no PostgreSQL!")
         return True
     except Exception as e:
         print(f"❌ Erro ao inserir transação no PostgreSQL: {e}")
         return False
+    finally:
+        conn.close()
 
 
 # ==========================================
@@ -143,11 +149,10 @@ def verificar_se_e_comando_resumo(texto):
         return False
 
     palavra_limpa = texto.strip().lower()
-    # 1. VALIDAÇÃO LOCAL DIRETA (Não gasta IA, não trava se estiver sem saldo)
+    # 1. VALIDAÇÃO LOCAL DIRETA
     if palavra_limpa in ["resumo", "relatorio", "relatório", "contador", "summary"]:
         return True
 
-    # 2. Se a IA estiver offline ou sem quota, nem tenta chamá-la para não dar timeout
     if not ai_client:
         return False
 
@@ -261,20 +266,18 @@ def download_relatorio(id_usuario):
     conn = obter_conexao_banco()
     if conn:
         try:
-            cursor = conn.cursor()
             id_com_mais = "+" + \
                 id_usuario if not id_usuario.startswith("+") else id_usuario
             id_sem_mais = id_usuario.replace("+", "")
 
-            cursor.execute("""
-                SELECT data_transacao, tipo, valor, local, categoria 
-                FROM transacoes 
-                WHERE id_whatsapp = %s OR id_whatsapp = %s
-                ORDER BY data_transacao DESC;
-            """, (id_com_mais, id_sem_mais))
-            linhas = cursor.fetchall()
-            cursor.close()
-            conn.close()
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT data_transacao, tipo, valor, local, categoria 
+                    FROM transacoes 
+                    WHERE id_whatsapp = %s OR id_whatsapp = %s
+                    ORDER BY data_transacao DESC;
+                """, (id_com_mais, id_sem_mais))
+                linhas = cursor.fetchall()
 
             with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
                 writer = csv.writer(f, delimiter=";")
@@ -289,6 +292,8 @@ def download_relatorio(id_usuario):
             return send_file(csv_path, mimetype="text/csv", as_attachment=True, download_name=f"Vio_Extrato_{id_usuario}.csv")
         except Exception as e:
             return f"Erro ao gerar arquivo: {e}", 500
+        finally:
+            conn.close()
     return "Banco offline", 500
 
 
@@ -308,10 +313,10 @@ def twilio_webhook():
 
     id_usuario = remetente.replace("whatsapp:", "").replace("+", "").strip()
 
-    # 1. GARANTE O REGISTO DO UTILIZADOR (Ativa os 7 dias grátis se for um número novo)
+    # 1. GARANTE O REGISTO DO UTILIZADOR
     verificar_e_registrar_usuario(id_usuario)
 
-    # 2. SEURANÇA: INTERCEPTOR DE ASSINATURA ATIVA / EXPIRADA
+    # 2. SEGURANÇA: INTERCEPTOR DE ASSINATURA ATIVA / EXPIRADA
     if not verificar_assinatura_ativa(id_usuario):
         twiml_resp = MessagingResponse()
         twiml_resp.message(
@@ -331,23 +336,20 @@ def twilio_webhook():
         conn = obter_conexao_banco()
         if conn:
             try:
-                cursor = conn.cursor()
                 id_com_mais = "+" + \
                     id_usuario if not id_usuario.startswith(
                         "+") else id_usuario
                 id_sem_mais = id_usuario.replace("+", "")
 
-                cursor.execute("""
-                    SELECT categoria, SUM(valor) 
-                    FROM transacoes 
-                    WHERE tipo = 'Saída' AND (id_whatsapp = %s OR id_whatsapp = %s)
-                    GROUP BY categoria 
-                    ORDER BY SUM(valor) DESC;
-                """, (id_com_mais, id_sem_mais))
-
-                linhas = cursor.fetchall()
-                cursor.close()
-                conn.close()
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT categoria, SUM(valor) 
+                        FROM transacoes 
+                        WHERE tipo = 'Saída' AND (id_whatsapp = %s OR id_whatsapp = %s)
+                        GROUP BY categoria 
+                        ORDER BY SUM(valor) DESC;
+                    """, (id_com_mais, id_sem_mais))
+                    linhas = cursor.fetchall()
 
                 twiml_resp = MessagingResponse()
                 msg = twiml_resp.message()
@@ -361,7 +363,6 @@ def twilio_webhook():
                         total_geral += val
                     resposta_texto += f"\n💰 *Total acumulado de Saídas:* *{total_geral:.2f} €*"
 
-                    # AJUSTE DE DOWNLOAD: Criação do link direto para clique do usuário no WhatsApp
                     host_app = request.host_url.rstrip('/')
                     link_download = f"{host_app}/download/{id_usuario}"
 
@@ -369,7 +370,6 @@ def twilio_webhook():
                     resposta_texto += f"\n📥 *Clica aqui para descarregar:* {link_download}"
 
                     msg.body(resposta_texto)
-                    # Mantém o envio nativo da mídia para compatibilidade com contas de produção
                     msg.media(link_download)
                 else:
                     resposta_texto = "📊 *Vio:* Ainda não encontrei nenhuma despesa registada para o teu número no banco de dados."
@@ -379,6 +379,8 @@ def twilio_webhook():
 
             except Exception as e_banco:
                 resposta_texto = f"⚠️ *Vio:* Erro ao processar o teu resumo no banco: {e_banco}"
+            finally:
+                conn.close()
         else:
             resposta_texto = "⚠️ *Vio:* O banco de dados está temporariamente inacessível."
 
@@ -431,7 +433,7 @@ def twilio_webhook():
 
 @app.route("/")
 def index():
-    return "Bot Vio Ativo e Operando via Twilio na Render com Proteção Híbrida e Controle de Assinaturas!"
+    return "Bot Vio Ativo e Operando via Twilio na Render com Proteção Híbrida, Banco Otimizado e Controle de Assinaturas!"
 
 
 if __name__ == "__main__":
