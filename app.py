@@ -60,8 +60,11 @@ def verificar_e_registrar_usuario(id_whatsapp):
     try:
         cursor = conn.cursor()
         id_limpo = str(id_whatsapp).replace("whatsapp:", "").strip()
+        # Modificado para garantir que novos usuários ganham 7 dias grátis por padrão na tabela
         cursor.execute(
-            "INSERT INTO usuarios (id_whatsapp) VALUES (%s) ON CONFLICT (id_whatsapp) DO NOTHING;",
+            """INSERT INTO usuarios (id_whatsapp, plano_ativo, data_validade) 
+               VALUES (%s, TRUE, CURRENT_TIMESTAMP + INTERVAL '7 days') 
+               ON CONFLICT (id_whatsapp) DO NOTHING;""",
             (id_limpo,)
         )
         conn.commit()
@@ -71,6 +74,31 @@ def verificar_e_registrar_usuario(id_whatsapp):
     except Exception as e:
         print(f"❌ Erro ao registar utilizador no banco: {e}")
         return False
+
+
+def verificar_assinatura_ativa(id_whatsapp):
+    """Verifica se o usuário tem o plano ativo e se está dentro da validade."""
+    conn = obter_conexao_banco()
+    if not conn:
+        return True  # Se o banco falhar, deixa passar para não travar os teus testes
+    try:
+        cursor = conn.cursor()
+        id_limpo = str(id_whatsapp).replace("whatsapp:", "").strip()
+        cursor.execute(
+            "SELECT plano_ativo, data_validade FROM usuarios WHERE id_whatsapp = %s;", (id_limpo,))
+        resultado = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        if resultado:
+            ativo, validade = resultado
+            # Se o plano foi desativado ou a data de validade já passou
+            if not ativo or (validade and datetime.now() > validade):
+                return False
+        return True
+    except Exception as e:
+        print(f"⚠️ Erro ao verificar assinatura: {e}")
+        return True
 
 
 def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro):
@@ -280,6 +308,19 @@ def twilio_webhook():
 
     id_usuario = remetente.replace("whatsapp:", "").replace("+", "").strip()
 
+    # 1. GARANTE O REGISTO DO UTILIZADOR (Ativa os 7 dias grátis se for um número novo)
+    verificar_e_registrar_usuario(id_usuario)
+
+    # 2. SEURANÇA: INTERCEPTOR DE ASSINATURA ATIVA / EXPIRADA
+    if not verificar_assinatura_ativa(id_usuario):
+        twiml_resp = MessagingResponse()
+        twiml_resp.message(
+            "🚫 *Vio:* O teu período de teste terminou ou a tua assinatura expirou.\n\n"
+            "Para continuares a gerir as tuas finanças com inteligência artificial por apenas *5,90€/mês*, "
+            "renova a tua conta aqui: [LINK_DO_STRIPE]"
+        )
+        return str(twiml_resp)
+
     if url_midia:
         texto_transcrito = processar_midia_url(url_midia, mime_type)
         if texto_transcrito:
@@ -319,11 +360,17 @@ def twilio_webhook():
                         resposta_texto += f"• {categoria_nome}: *{val:.2f} €*\n"
                         total_geral += val
                     resposta_texto += f"\n💰 *Total acumulado de Saídas:* *{total_geral:.2f} €*"
-                    resposta_texto += "\n\n📄 _O arquivo completo em Excel foi consolidado para o teu Contador abaixo!_"
+
+                    # AJUSTE DE DOWNLOAD: Criação do link direto para clique do usuário no WhatsApp
+                    host_app = request.host_url.rstrip('/')
+                    link_download = f"{host_app}/download/{id_usuario}"
+
+                    resposta_texto += "\n\n📄 _O arquivo completo em Excel foi consolidado para o teu Contador!_"
+                    resposta_texto += f"\n📥 *Clica aqui para descarregar:* {link_download}"
 
                     msg.body(resposta_texto)
-                    host_app = request.host_url.rstrip('/')
-                    msg.media(f"{host_app}/download/{id_usuario}")
+                    # Mantém o envio nativo da mídia para compatibilidade com contas de produção
+                    msg.media(link_download)
                 else:
                     resposta_texto = "📊 *Vio:* Ainda não encontrei nenhuma despesa registada para o teu número no banco de dados."
                     msg.body(resposta_texto)
@@ -335,7 +382,6 @@ def twilio_webhook():
         else:
             resposta_texto = "⚠️ *Vio:* O banco de dados está temporariamente inacessível."
 
-        # CORREÇÃO: Garante o encerramento limpo do bloco caso entre nas exceções de banco
         twiml_resp = MessagingResponse()
         twiml_resp.message(resposta_texto)
         return str(twiml_resp)
@@ -385,7 +431,7 @@ def twilio_webhook():
 
 @app.route("/")
 def index():
-    return "Bot Vio Ativo e Operando via Twilio na Render com Proteção Híbrida!"
+    return "Bot Vio Ativo e Operando via Twilio na Render com Proteção Híbrida e Controle de Assinaturas!"
 
 
 if __name__ == "__main__":
