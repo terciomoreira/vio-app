@@ -3,7 +3,7 @@ import json
 import csv
 from datetime import datetime
 import requests
-from flask import Flask, request, send_file
+from flask import Flask, request, send_file, render_template_string
 from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client
 import psycopg2  # Conector do PostgreSQL
@@ -20,6 +20,8 @@ TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
 TWILIO_NUMBER = os.environ.get("TWILIO_NUMBER")
 DATABASE_URL = os.environ.get("DATABASE_URL")
+STRIPE_WEBHOOK_SECRET = os.environ.get(
+    "STRIPE_WEBHOOK_SECRET")  # Adicionaremos na Render depois
 
 # Inicializa o Twilio Client se as chaves existirem
 twilio_client = None
@@ -59,7 +61,6 @@ def verificar_e_registrar_usuario(id_whatsapp):
     if not conn:
         return False
     try:
-        # Uso do 'with' garante fechamento automático do cursor e commit/rollback seguro
         with conn:
             with conn.cursor() as cursor:
                 cursor.execute(
@@ -81,7 +82,7 @@ def verificar_assinatura_ativa(id_whatsapp):
     id_limpo = str(id_whatsapp).replace("whatsapp:", "").strip()
     conn = obter_conexao_banco()
     if not conn:
-        return True  # Se o banco falhar, deixa passar para não travar os testes
+        return True
     try:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -104,7 +105,6 @@ def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro
     id_limpo = str(id_whatsapp).replace("whatsapp:", "").strip()
     verificar_e_registrar_usuario(id_limpo)
 
-    # PROTEÇÃO: Evita quebra do float se o valor vier corrompido, vazio ou em formato texto
     try:
         valor_numerico = float(valor) if valor else 0.0
     except (ValueError, TypeError):
@@ -149,7 +149,6 @@ def verificar_se_e_comando_resumo(texto):
         return False
 
     palavra_limpa = texto.strip().lower()
-    # 1. VALIDAÇÃO LOCAL DIRETA
     if palavra_limpa in ["resumo", "relatorio", "relatório", "contador", "summary"]:
         return True
 
@@ -298,6 +297,167 @@ def download_relatorio(id_usuario):
 
 
 # ==========================================
+#  ROTA: LANDING PAGE OFICIAL DO VIO (MUITO COMPLETA)
+# ==========================================
+
+@app.route("/")
+def index():
+    html_landing_page = """
+    <!DOCTYPE html>
+    <html lang="pt">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Vio - O Seu Gestor Financeiro por Voz</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-[#040814] text-white font-sans antialiased selection:bg-blue-500 selection:text-white">
+
+        <header class="max-w-6xl mx-auto px-6 py-6 flex justify-between items-center border-b border-gray-900">
+            <div class="flex items-center space-x-3">
+                <span class="text-2xl font-black tracking-wider bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent">VIO</span>
+            </div>
+            <a href="#precos" class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-medium px-6 py-2.5 rounded-full transition duration-300 text-sm shadow-md shadow-blue-600/10">
+                Aceder ao WhatsApp
+            </a>
+        </header>
+
+        <section class="max-w-5xl mx-auto px-6 pt-20 pb-12 text-center">
+            <h1 class="text-4xl md:text-6xl font-black tracking-tight leading-none bg-gradient-to-r from-white via-blue-100 to-blue-400 bg-clip-text text-transparent">
+                O Seu Gestor Financeiro<br class="hidden md:block"> por Voz
+            </h1>
+            <p class="mt-6 text-lg md:text-xl text-gray-400 max-w-2xl mx-auto font-normal leading-relaxed">
+                Controle todas as suas despesas e ganhos enviando apenas mensagens de áudio ou texto no WhatsApp. Inteligência artificial pura, sem complicações.
+            </p>
+            <div class="mt-10">
+                <a href="#precos" class="inline-block bg-blue-600 hover:bg-blue-500 text-white font-bold px-8 py-4 rounded-xl text-lg transition duration-200 shadow-xl shadow-blue-600/20 transform hover:-translate-y-0.5">
+                    Experimentar Grátis por 7 Dias
+                </a>
+            </div>
+        </section>
+
+        <section class="max-w-4xl mx-auto px-6 py-10">
+            <div class="bg-[#090f24] rounded-2xl border border-gray-800/60 p-8 shadow-2xl relative overflow-hidden group">
+                <div class="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-blue-500 to-transparent"></div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8 text-center relative z-10">
+                    <div class="flex flex-col items-center p-4">
+                        <div class="w-12 h-12 bg-blue-500/10 rounded-full flex items-center justify-center text-blue-400 mb-4 text-xl">🎙️</div>
+                        <h3 class="font-bold text-lg text-white tracking-wide">REGISTO DIRETO</h3>
+                        <p class="text-sm text-gray-400 mt-2 italic">"Gastei 50 euros no Pingo Doce"</p>
+                    </div>
+                    <div class="flex flex-col items-center p-4 border-y md:border-y-0 md:border-x border-gray-800/80">
+                        <div class="w-12 h-12 bg-indigo-500/10 rounded-full flex items-center justify-center text-indigo-400 mb-4 text-xl">📋</div>
+                        <h3 class="font-bold text-lg text-white tracking-wide">CATEGORIZAÇÃO</h3>
+                        <p class="text-sm text-gray-400 mt-2">Separação automática para o e-fatura</p>
+                    </div>
+                    <div class="flex flex-col items-center p-4">
+                        <div class="w-12 h-12 bg-cyan-500/10 rounded-full flex items-center justify-center text-cyan-400 mb-4 text-xl">📊</div>
+                        <h3 class="font-bold text-lg text-white tracking-wide">EXPORTAÇÃO</h3>
+                        <p class="text-sm text-gray-400 mt-2">Relatórios prontos para o seu IRS / Contador</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="precos" class="max-w-4xl mx-auto px-6 py-20 text-center">
+            <div class="max-w-md mx-auto bg-[#090f24] border border-blue-500/20 rounded-3xl p-8 shadow-2xl relative">
+                <span class="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-blue-600 text-xs uppercase font-extrabold px-3 py-1 rounded-full tracking-wider">Acesso Total</span>
+                <h3 class="text-xl font-bold text-gray-200 mt-2">Assinatura Mensal Vio</h3>
+                
+                <div class="mt-6 flex justify-center items-baseline text-white">
+                    <span class="text-5xl font-black tracking-tight">5,90€</span>
+                    <span class="ml-1 text-lg text-gray-400">/mês</span>
+                </div>
+                
+                <ul class="mt-8 space-y-4 text-sm text-gray-300 text-left border-t border-gray-800/60 pt-6">
+                    <li class="flex items-center space-x-3">
+                        <span class="text-blue-400">✔</span> <span>Lançamentos por áudio e texto ilimitados</span>
+                    </li>
+                    <li class="flex items-center space-x-3">
+                        <span class="text-blue-400">✔</span> <span>Inteligência Artificial Ativa (Gemini API)</span>
+                    </li>
+                    <li class="flex items-center space-x-3">
+                        <span class="text-blue-400">✔</span> <span>Comando "resumo" com análise imediata</span>
+                    </li>
+                    <li class="flex items-center space-x-3">
+                        <span class="text-blue-400">✔</span> <span>Download direto do Excel consolidado</span>
+                    </li>
+                </ul>
+                
+                <div class="mt-8">
+                    <a href="#" class="block w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold py-3.5 px-4 rounded-xl transition duration-200 text-center shadow-lg shadow-indigo-600/10">
+                        Ativar Conta com Stripe 💳
+                    </a>
+                </div>
+                <p class="text-xs text-gray-500 mt-4">Cancelamento fácil a qualquer momento. Processado via Stripe.</p>
+            </div>
+        </section>
+
+        <footer class="py-8 text-center text-xs text-gray-600 border-t border-gray-900 max-w-6xl mx-auto px-6">
+            © 2026 Vio. Operando em conformidade com as diretrizes do ecossistema Twilio e Google Gemini AI Studio.
+        </footer>
+    </body>
+    </html>
+    """
+    return render_template_string(html_landing_page)
+
+
+# ==========================================
+#  ROTA: WEBHOOK DO STRIPE (MECANISMO DE ASSINATURA)
+# ==========================================
+
+@app.route("/stripe-webhook", methods=["POST"])
+def stripe_webhook():
+    payload = request.data
+    sig_header = request.headers.get('Stripe-Signature')
+
+    # No futuro, usaremos a biblioteca do stripe oficial para validar a assinatura digital:
+    # event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+
+    # Validação manual simples para testes rápidos de integração inicial
+    try:
+        dados_evento = json.loads(payload)
+        tipo_evento = dados_evento.get("type")
+
+        print(f"💳 Webhook Stripe Recebido: {tipo_evento}")
+
+        # Se o checkout foi concluído com sucesso
+        if tipo_evento == "checkout.session.completed":
+            sessao = dados_evento.get("data", {}).get("object", {})
+
+            # Recuperamos o número do whatsapp salvo nos metadados do checkout
+            id_whatsapp = sessao.get("metadata", {}).get("id_whatsapp")
+
+            if id_whatsapp:
+                id_limpo = str(id_whatsapp).replace(
+                    "whatsapp:", "").replace("+", "").strip()
+                conn = obter_conexao_banco()
+                if conn:
+                    try:
+                        with conn:
+                            with conn.cursor() as cursor:
+                                # Renova por mais 30 dias a contar de hoje
+                                cursor.execute("""
+                                    UPDATE usuarios 
+                                    SET plano_ativo = TRUE, data_validade = CURRENT_TIMESTAMP + INTERVAL '30 days'
+                                    WHERE id_whatsapp = %s;
+                                """, (id_limpo,))
+                        print(
+                            f"🚀 Usuário {id_limpo} ativado via Stripe com sucesso!")
+                    except Exception as err:
+                        print(
+                            f"❌ Erro ao atualizar plano no banco via webhook: {err}")
+                    finally:
+                        conn.close()
+
+        return json.dumps({"success": True}), 200
+    except Exception as e:
+        print(f"❌ Falha crítica no processamento do webhook: {e}")
+        return "Erro Interno", 400
+
+
+# ==========================================
 #  WEBHOOK DO TWILIO
 # ==========================================
 
@@ -313,16 +473,14 @@ def twilio_webhook():
 
     id_usuario = remetente.replace("whatsapp:", "").replace("+", "").strip()
 
-    # 1. GARANTE O REGISTO DO UTILIZADOR
     verificar_e_registrar_usuario(id_usuario)
 
-    # 2. SEGURANÇA: INTERCEPTOR DE ASSINATURA ATIVA / EXPIRADA
     if not verificar_assinatura_ativa(id_usuario):
         twiml_resp = MessagingResponse()
         twiml_resp.message(
             "🚫 *Vio:* O teu período de teste terminou ou a tua assinatura expirou.\n\n"
             "Para continuares a gerir as tuas finanças com inteligência artificial por apenas *5,90€/mês*, "
-            "renova a tua conta aqui: [LINK_DO_STRIPE]"
+            "renova a tua conta aqui: https://vio-app-1.onrender.com"
         )
         return str(twiml_resp)
 
@@ -331,7 +489,6 @@ def twilio_webhook():
         if texto_transcrito:
             texto_recebido = texto_transcrito
 
-    # INTERCEPTOR: COMANDO DE RESUMO
     if texto_recebido and verificar_se_e_comando_resumo(texto_recebido):
         conn = obter_conexao_banco()
         if conn:
@@ -388,7 +545,6 @@ def twilio_webhook():
         twiml_resp.message(resposta_texto)
         return str(twiml_resp)
 
-    # FLUXO NORMAL: PROCESSAMENTO DE LANÇAMENTOS
     resposta_texto = ""
     if texto_recebido:
         try:
@@ -429,11 +585,6 @@ def twilio_webhook():
     twiml_resp = MessagingResponse()
     twiml_resp.message(resposta_texto)
     return str(twiml_resp)
-
-
-@app.route("/")
-def index():
-    return "Bot Vio Ativo e Operando via Twilio na Render com Proteção Híbrida, Banco Otimizado e Controle de Assinaturas!"
 
 
 if __name__ == "__main__":
