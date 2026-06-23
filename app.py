@@ -186,16 +186,22 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
     if not ai_client or not texto_ou_transcricao:
         return "Saída", "", "Desconhecido", "Outros Gastos"
 
+    # Prompt expandido para dar suporte total a notificações bancárias automáticas e Google Pay
     prompt = (
-        "Atue como um analista financeiro de alta precisão. Extraia os dados estruturados da mensagem do usuário fornecida abaixo.\n"
-        "Identifique o tipo (Entrada se for ganho/salário, Saída se for gasto/compra), o valor numérico (use ponto como decimal), "
-        "o local/estabelecimento and atribua uma categoria com um emoji adequado.\n\n"
-        f"Mensagem do usuário: \"{texto_ou_transcricao}\"\n\n"
+        "Atue como um analista financeiro e extrator de dados bancários de altíssima precisão.\n"
+        "Analise o texto fornecido pelo usuário. Este texto pode ser uma frase direta ou uma NOTIFICAÇÃO AUTOMÁTICA de banco, SMS bancário, Google Pay ou Apple Pay.\n"
+        "Extraia os dados estritamente corretos da transação financeira.\n\n"
+        "Regras cruciais:\n"
+        "1. Identifique o tipo: 'Entrada' se for ganho/salário/reembolso, 'Saída' se for gasto/compra/pagamento.\n"
+        "2. Identifique o valor numérico exato (use sempre ponto como separador decimal, ex: 9.55).\n"
+        "3. Identifique o Local/Estabelecimento de forma limpa. Remova termos técnicos como 'S.A.', 'TPA', 'COMPRA', 'ONLINE' (ex: 'Mercadona S.A.' vira apenas 'Mercadona').\n"
+        "4. Atribua uma categoria coerente baseada no local ou produto acompanhada de um emoji adequado.\n\n"
+        f"Texto para análise: \"{texto_ou_transcricao}\"\n\n"
         "Formatos JSON estrito exigido:\n"
         "{\n"
         '  "tipo": "Entrada" ou "Saída",\n'
-        '  "valor": "apenas numbers (ex: 1.30)",\n'
-        '  "local": "Nome do estabelecimento",\n'
+        '  "valor": "apenas números (ex: 9.55)",\n'
+        '  "local": "Nome limpo do estabelecimento",\n'
         '  "categoria": "Emoji + Nome da Categoria"\n'
         "}"
     )
@@ -218,7 +224,7 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
             dados.get("categoria", "Outros Gastos")
         )
     except Exception as e:
-        print(f"❌ Erro na análise do Gemini: {e}")
+        print(f"❌ Erro na análise de texto do Gemini: {e}")
         import re
         valores = re.findall(r"\d+(?:[.,]\d+)?", texto_ou_transcricao)
         valor_descoberto = valores[0].replace(",", ".") if valores else ""
@@ -236,28 +242,50 @@ def processar_midia_url(url_midia, mime_type):
             TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
         with open(arquivo_temp, "wb") as f:
             f.write(resposta.content)
+
         midia_gemini = ai_client.files.upload(file=arquivo_temp)
-        prompt = "Transcreva este áudio." if eh_audio else "Analise este recibo."
-        resposta_gemini = ai_client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=[midia_gemini, prompt]
-        )
-        try:
-            ai_client.files.delete(name=midia_gemini.name)
-        except Exception:
-            pass
-        return resposta_gemini.text.strip()
+
+        if eh_audio:
+            prompt = "Transcreva este áudio com atenção aos valores e locais mencionados."
+            resposta_gemini = ai_client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[midia_gemini, prompt]
+            )
+            return resposta_gemini.text.strip()
+        else:
+            # CORREÇÃO CRUCIAL: Forçar o Gemini a analisar a imagem e extrair os dados em formato de texto interpretável pelo bot
+            prompt = (
+                "Você é um leitor óptico (OCR) financeiro avançado.\n"
+                "Analise este talão de compra / recibo / fatura simplificada.\n"
+                "Extraia o valor TOTAL da compra e o nome do estabelecimento.\n"
+                "Formate a sua resposta como uma frase simples para que o bot possa processar nativamente, no seguinte formato exato:\n"
+                "Gastei [VALOR TOTAL] no [ESTABELECIMENTO]\n\n"
+                "Exemplo de saída esperada: Gastei 9.55 no Mercadona"
+            )
+            resposta_gemini = ai_client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[midia_gemini, prompt]
+            )
+            resultado_imagem = resposta_gemini.text.strip()
+            print(f"📸 Resultado do OCR da imagem: {resultado_imagem}")
+            return resultado_imagem
+
     except Exception as e:
         print(f"❌ Erro ao processar mídia: {e}")
         return ""
     finally:
+        try:
+            if 'midia_gemini' in locals():
+                ai_client.files.delete(name=midia_gemini.name)
+        except Exception:
+            pass
         if os.path.exists(arquivo_temp):
             os.remove(arquivo_temp)
-
 
 # ==========================================
 #  ROTA: GERADOR E DOWNLOAD DE EXCEL/CSV
 # ==========================================
+
 
 @app.route("/download/<id_usuario>", methods=["GET"])
 def download_relatorio(id_usuario):
