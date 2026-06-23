@@ -418,7 +418,7 @@ def index():
                         <span class="text-blue-400">✔</span> <span>Lançamentos por áudio e texto ilimitados</span>
                     </li>
                     <li class="flex items-center space-x-3">
-                        <span class="text-blue-400">✔</span> <span>Inteligência Artificial Ativa (Gemini API)</span>
+                        <span class="text-blue-400">✔</span> <span>Inteligência Artificial Ativa </span>
                     </li>
                     <li class="flex items-center space-x-3">
                         <span class="text-blue-400">✔</span> <span>Comando "resumo" com análise imediata</span>
