@@ -345,10 +345,7 @@ def download_relatorio(id_usuario):
 
 @app.route("/")
 def index():
-    # Usamos o url_for para o Flask mapear o caminho correto da imagem automaticamente
-    logo_url = url_for('static', filename='logo-vio.jpeg')
-
-    html_landing_page = f"""
+    html_landing_page = """
     <!DOCTYPE html>
     <html lang="pt">
     <head>
@@ -369,7 +366,7 @@ def index():
 
         <section class="max-w-5xl mx-auto px-6 pt-16 pb-12 text-center">
             <div class="flex justify-center mb-8">
-                <img src="{logo_url}" alt="Logo Vio" class="w-40 h-auto rounded-2xl shadow-xl shadow-blue-500/5 border border-gray-800">
+                <img src="/static/logo-vio.jpeg" alt="Logo Vio" class="w-40 h-auto rounded-2xl shadow-xl shadow-blue-500/5 border border-gray-800">
             </div>
             
             <h1 class="text-4xl md:text-6xl font-black tracking-tight leading-none bg-gradient-to-r from-white via-blue-100 to-blue-400 bg-clip-text text-transparent">
@@ -445,8 +442,7 @@ def index():
     </body>
     </html>
     """
-    return render_template_string(html_landing_page)
-# ==========================================
+    return render_template_string(html_landing_page)  # ==========================================
 #  ROTA: WEBHOOK DO STRIPE
 # ==========================================
 
