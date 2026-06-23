@@ -364,7 +364,11 @@ def index():
             </a>
         </header>
 
-        <section class="max-w-5xl mx-auto px-6 pt-20 pb-12 text-center">
+        <section class="max-w-5xl mx-auto px-6 pt-16 pb-12 text-center">
+            <div class="flex justify-center mb-8">
+                <img src="/static/logo-vio.jpeg" alt="Logo Vio" class="w-40 h-auto rounded-2xl shadow-xl shadow-blue-500/5 border border-gray-800">
+            </div>
+            
             <h1 class="text-4xl md:text-6xl font-black tracking-tight leading-none bg-gradient-to-r from-white via-blue-100 to-blue-400 bg-clip-text text-transparent">
                 O Seu Gestor Financeiro<br class="hidden md:block"> por Voz
             </h1>
@@ -440,10 +444,10 @@ def index():
     """
     return render_template_string(html_landing_page)
 
-
 # ==========================================
 #  ROTA: WEBHOOK DO STRIPE
 # ==========================================
+
 
 @app.route("/stripe-webhook", methods=["POST"])
 def stripe_webhook():
