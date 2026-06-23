@@ -342,9 +342,9 @@ def download_relatorio(id_usuario):
 # ==========================================
 #  ROTA: LANDING PAGE OFICIAL DO VIO
 # ==========================================
-
 @app.route("/")
 def index():
+    # Estrutura HTML limpa, sem o prefixo 'f' para evitar conflito com as chaves do Tailwind
     html_landing_page = """
     <!DOCTYPE html>
     <html lang="pt">
@@ -377,7 +377,7 @@ def index():
             </p>
             <div class="mt-10">
                 <a href="#precos" class="inline-block bg-blue-600 hover:bg-blue-500 text-white font-bold px-8 py-4 rounded-xl text-lg transition duration-200 shadow-xl shadow-blue-600/20 transform hover:-translate-y-0.5">
-                    Experimentar Grátis por 7 Days
+                    Experimentar Grátis por 7 Dias
                 </a>
             </div>
         </section>
@@ -442,9 +442,7 @@ def index():
     </body>
     </html>
     """
-    return render_template_string(html_landing_page)  # ==========================================
-#  ROTA: WEBHOOK DO STRIPE
-# ==========================================
+    return render_template_string(html_landing_page)
 
 
 @app.route("/stripe-webhook", methods=["POST"])
