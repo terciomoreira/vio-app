@@ -13,7 +13,7 @@ import psycopg2  # Conector do PostgreSQL
 from google import genai
 from google.genai import types
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static', static_url_path='/static')
 
 # Configurações Globais via Variáveis de Ambiente na Render
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -345,7 +345,10 @@ def download_relatorio(id_usuario):
 
 @app.route("/")
 def index():
-    html_landing_page = """
+    # Usamos o url_for para o Flask mapear o caminho correto da imagem automaticamente
+    logo_url = url_for('static', filename='logo-vio.jpeg')
+
+    html_landing_page = f"""
     <!DOCTYPE html>
     <html lang="pt">
     <head>
@@ -366,7 +369,7 @@ def index():
 
         <section class="max-w-5xl mx-auto px-6 pt-16 pb-12 text-center">
             <div class="flex justify-center mb-8">
-                <img src="/static/logo-vio.jpeg" alt="Logo Vio" class="w-40 h-auto rounded-2xl shadow-xl shadow-blue-500/5 border border-gray-800">
+                <img src="{logo_url}" alt="Logo Vio" class="w-40 h-auto rounded-2xl shadow-xl shadow-blue-500/5 border border-gray-800">
             </div>
             
             <h1 class="text-4xl md:text-6xl font-black tracking-tight leading-none bg-gradient-to-r from-white via-blue-100 to-blue-400 bg-clip-text text-transparent">
@@ -443,7 +446,6 @@ def index():
     </html>
     """
     return render_template_string(html_landing_page)
-
 # ==========================================
 #  ROTA: WEBHOOK DO STRIPE
 # ==========================================
