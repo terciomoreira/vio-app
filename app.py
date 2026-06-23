@@ -366,7 +366,7 @@ def index():
 
         <section class="max-w-5xl mx-auto px-6 pt-16 pb-12 text-center">
             <div class="flex justify-center mb-8">
-                <img src="/static/logo-vio.jpeg" alt="Logo Vio" class="w-40 h-auto rounded-2xl shadow-xl shadow-blue-500/5 border border-gray-800">
+                <img src=https://github.com/terciomoreira/vio-app/blob/main/static/logo-vio.jpeg.jpeg?raw=true alt="Logo Vio" class="w-40 h-auto rounded-2xl shadow-xl shadow-blue-500/5 border border-gray-800">
             </div>
             
             <h1 class="text-4xl md:text-6xl font-black tracking-tight leading-none bg-gradient-to-r from-white via-blue-100 to-blue-400 bg-clip-text text-transparent">
