@@ -1,6 +1,7 @@
 import os
 import json
 import csv
+import re
 from datetime import datetime
 import requests
 from flask import Flask, request, send_file, render_template_string
@@ -74,7 +75,8 @@ def verificar_e_registrar_usuario(id_whatsapp):
         print(f"❌ Erro ao registar utilizador no banco: {e}")
         return False
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 def verificar_assinatura_ativa(id_whatsapp):
@@ -98,7 +100,8 @@ def verificar_assinatura_ativa(id_whatsapp):
         print(f"⚠️ Erro ao verificar assinatura: {e}")
         return True
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro):
@@ -106,6 +109,13 @@ def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro
     verificar_e_registrar_usuario(id_limpo)
 
     try:
+        # Sanatização avançada de valor para lidar com caracteres residuais de moedas (€, $, R$)
+        if isinstance(valor, str):
+            valor = re.sub(r"[^\d.,]", "", valor)
+            if "," in valor and "." in valor:
+                valor = valor.replace(",", "")
+            elif "," in valor:
+                valor = valor.replace(",", ".")
         valor_numerico = float(valor) if valor else 0.0
     except (ValueError, TypeError):
         print(
@@ -129,7 +139,8 @@ def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro
         print(f"❌ Erro ao inserir transação no PostgreSQL: {e}")
         return False
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 # ==========================================
@@ -158,7 +169,7 @@ def verificar_se_e_comando_resumo(texto):
     prompt = (
         "Atue como um classificador de intenção linguística de alta precisão.\n"
         "Analise a mensagem enviada pelo usuário e determine se ele está solicitando um resumo, relatório, extrato ou balanço de finanças.\n"
-        "Se for um lançamento de despesa comum, responda obrigatoriamente false.\n\n"
+        "Se for um lançamento de despesa comum ou uma notificação bancária recebida, responda obrigatoriamente false.\n\n"
         f"Mensagem do usuário: \"{texto}\"\n\n"
         "Responda estritamente com um JSON no seguinte formato:\n"
         "{\n"
@@ -184,17 +195,16 @@ def verificar_se_e_comando_resumo(texto):
 
 def inteligencia_universal_gemini(texto_ou_transcricao):
     if not ai_client or not texto_ou_transcricao:
-        return "Saída", "", "Desconhecido", "Outros Gastos"
+        return "Saída", "", "Desconhecido", "🛒 Outros Gastos"
 
-    # Prompt expandido para dar suporte total a notificações bancárias automáticas e Google Pay
     prompt = (
         "Atue como um analista financeiro e extrator de dados bancários de altíssima precisão.\n"
         "Analise o texto fornecido pelo usuário. Este texto pode ser uma frase direta ou uma NOTIFICAÇÃO AUTOMÁTICA de banco, SMS bancário, Google Pay ou Apple Pay.\n"
         "Extraia os dados estritamente corretos da transação financeira.\n\n"
         "Regras cruciais:\n"
-        "1. Identifique o tipo: 'Entrada' se for ganho/salário/reembolso, 'Saída' se for gasto/compra/pagamento.\n"
-        "2. Identifique o valor numérico exato (use sempre ponto como separador decimal, ex: 9.55).\n"
-        "3. Identifique o Local/Estabelecimento de forma limpa. Remova termos técnicos como 'S.A.', 'TPA', 'COMPRA', 'ONLINE' (ex: 'Mercadona S.A.' vira apenas 'Mercadona').\n"
+        "1. Identifique o tipo: 'Entrada' se for ganho/salário/reembolso/transferência recebida, 'Saída' se for gasto/compra/pagamento/débito.\n"
+        "2. Identifique o valor numérico exato (use sempre ponto como separador decimal, ex: 9.55). Nunca confunda o valor da compra com saldo restante ou dados parciais do cartão.\n"
+        "3. Identifique o Local/Estabelecimento de forma limpa. Remova termos técnicos como 'S.A.', 'TPA', 'COMPRA', 'ONLINE', 'CÁGADO' (ex: 'Mercadona S.A.' vira apenas 'Mercadona').\n"
         "4. Atribua uma categoria coerente baseada no local ou produto acompanhada de um emoji adequado.\n\n"
         f"Texto para análise: \"{texto_ou_transcricao}\"\n\n"
         "Formatos JSON estrito exigido:\n"
@@ -221,13 +231,19 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
             dados.get("tipo", "Saída"),
             dados.get("valor", ""),
             dados.get("local", "Desconhecido"),
-            dados.get("categoria", "Outros Gastos")
+            dados.get("categoria", "🛒 Outros Gastos")
         )
     except Exception as e:
         print(f"❌ Erro na análise de texto do Gemini: {e}")
-        import re
+        # Fallback inteligente se a IA falhar: captura o valor monetário de forma mais segura
         valores = re.findall(r"\d+(?:[.,]\d+)?", texto_ou_transcricao)
-        valor_descoberto = valores[0].replace(",", ".") if valores else ""
+        valor_descoberto = ""
+        if valores:
+            # Filtra possíveis números longos como números de cartões ou horários
+            filtrados = [v for v in valores if len(
+                v.replace('.', '').replace(',', '')) <= 6]
+            valor_descoberto = filtrados[0].replace(
+                ",", ".") if filtrados else valores[0].replace(",", ".")
         return "Saída", valor_descoberto, "Não especificado", "🛒 Outros Gastos"
 
 
@@ -253,7 +269,6 @@ def processar_midia_url(url_midia, mime_type):
             )
             return resposta_gemini.text.strip()
         else:
-            # CORREÇÃO CRUCIAL: Forçar o Gemini a analisar a imagem e extrair os dados em formato de texto interpretável pelo bot
             prompt = (
                 "Você é um leitor óptico (OCR) financeiro avançado.\n"
                 "Analise este talão de compra / recibo / fatura simplificada.\n"
@@ -325,7 +340,7 @@ def download_relatorio(id_usuario):
 
 
 # ==========================================
-#  ROTA: LANDING PAGE OFICIAL DO VIO (MUITO COMPLETA)
+#  ROTA: LANDING PAGE OFICIAL DO VIO
 # ==========================================
 
 @app.route("/")
@@ -340,7 +355,6 @@ def index():
         <script src="https://cdn.tailwindcss.com"></script>
     </head>
     <body class="bg-[#040814] text-white font-sans antialiased selection:bg-blue-500 selection:text-white">
-
         <header class="max-w-6xl mx-auto px-6 py-6 flex justify-between items-center border-b border-gray-900">
             <div class="flex items-center space-x-3">
                 <span class="text-2xl font-black tracking-wider bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent">VIO</span>
@@ -359,7 +373,7 @@ def index():
             </p>
             <div class="mt-10">
                 <a href="#precos" class="inline-block bg-blue-600 hover:bg-blue-500 text-white font-bold px-8 py-4 rounded-xl text-lg transition duration-200 shadow-xl shadow-blue-600/20 transform hover:-translate-y-0.5">
-                    Experimentar Grátis por 7 Dias
+                    Experimentar Grátis por 7 Days
                 </a>
             </div>
         </section>
@@ -367,7 +381,6 @@ def index():
         <section class="max-w-4xl mx-auto px-6 py-10">
             <div class="bg-[#090f24] rounded-2xl border border-gray-800/60 p-8 shadow-2xl relative overflow-hidden group">
                 <div class="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-blue-500 to-transparent"></div>
-                
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-8 text-center relative z-10">
                     <div class="flex flex-col items-center p-4">
                         <div class="w-12 h-12 bg-blue-500/10 rounded-full flex items-center justify-center text-blue-400 mb-4 text-xl">🎙️</div>
@@ -392,12 +405,10 @@ def index():
             <div class="max-w-md mx-auto bg-[#090f24] border border-blue-500/20 rounded-3xl p-8 shadow-2xl relative">
                 <span class="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-blue-600 text-xs uppercase font-extrabold px-3 py-1 rounded-full tracking-wider">Acesso Total</span>
                 <h3 class="text-xl font-bold text-gray-200 mt-2">Assinatura Mensal Vio</h3>
-                
                 <div class="mt-6 flex justify-center items-baseline text-white">
                     <span class="text-5xl font-black tracking-tight">5,90€</span>
                     <span class="ml-1 text-lg text-gray-400">/mês</span>
                 </div>
-                
                 <ul class="mt-8 space-y-4 text-sm text-gray-300 text-left border-t border-gray-800/60 pt-6">
                     <li class="flex items-center space-x-3">
                         <span class="text-blue-400">✔</span> <span>Lançamentos por áudio e texto ilimitados</span>
@@ -412,7 +423,6 @@ def index():
                         <span class="text-blue-400">✔</span> <span>Download direto do Excel consolidado</span>
                     </li>
                 </ul>
-                
                 <div class="mt-8">
                     <a href="#" class="block w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold py-3.5 px-4 rounded-xl transition duration-200 text-center shadow-lg shadow-indigo-600/10">
                         Ativar Conta com Stripe 💳
@@ -432,29 +442,20 @@ def index():
 
 
 # ==========================================
-#  ROTA: WEBHOOK DO STRIPE (MECANISMO DE ASSINATURA)
+#  ROTA: WEBHOOK DO STRIPE
 # ==========================================
 
 @app.route("/stripe-webhook", methods=["POST"])
 def stripe_webhook():
     payload = request.data
-    sig_header = request.headers.get('Stripe-Signature')
-
-    # No futuro, usaremos a biblioteca do stripe oficial para validar a assinatura digital:
-    # event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
-
-    # Validação manual simples para testes rápidos de integração inicial
     try:
         dados_evento = json.loads(payload)
         tipo_evento = dados_evento.get("type")
 
         print(f"💳 Webhook Stripe Recebido: {tipo_evento}")
 
-        # Se o checkout foi concluído com sucesso
         if tipo_evento == "checkout.session.completed":
             sessao = dados_evento.get("data", {}).get("object", {})
-
-            # Recuperamos o número do whatsapp salvo nos metadados do checkout
             id_whatsapp = sessao.get("metadata", {}).get("id_whatsapp")
 
             if id_whatsapp:
@@ -465,7 +466,6 @@ def stripe_webhook():
                     try:
                         with conn:
                             with conn.cursor() as cursor:
-                                # Renova por mais 30 dias a contar de hoje
                                 cursor.execute("""
                                     UPDATE usuarios 
                                     SET plano_ativo = TRUE, data_validade = CURRENT_TIMESTAMP + INTERVAL '30 days'
@@ -543,7 +543,7 @@ def twilio_webhook():
                     resposta_texto = "📊 *Vio: Aqui está o teu Resumo Financeiro!*\n\n"
                     total_geral = 0
                     for cat, val in linhas:
-                        categoria_nome = cat if cat else "Outros/Não Categorizado"
+                        categoria_nome = cat if cat else "🛒 Outros Gastos"
                         resposta_texto += f"• {categoria_nome}: *{val:.2f} €*\n"
                         total_geral += val
                     resposta_texto += f"\n💰 *Total acumulado de Saídas:* *{total_geral:.2f} €*"
@@ -579,7 +579,6 @@ def twilio_webhook():
             tipo, v, l, c = inteligencia_universal_gemini(texto_recebido)
         except Exception as e_gemini:
             print(f"⚠️ Falha na IA, aplicando Fallback manual: {e_gemini}")
-            import re
             valores = re.findall(r"\d+(?:[.,]\d+)?", texto_recebido)
             v = valores[0].replace(",", ".") if valores else ""
             tipo, l, c = "Saída", "Não especificado", "🛒 Outros Gastos"
