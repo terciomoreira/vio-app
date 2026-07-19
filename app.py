@@ -21,8 +21,7 @@ TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
 TWILIO_NUMBER = os.environ.get("TWILIO_NUMBER")
 DATABASE_URL = os.environ.get("DATABASE_URL")
-STRIPE_WEBHOOK_SECRET = os.environ.get(
-    "STRIPE_WEBHOOK_SECRET")  # Adicionaremos na Render depois
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 
 # Inicializa o Twilio Client se as chaves existirem
 twilio_client = None
@@ -39,7 +38,7 @@ else:
 
 
 # ==========================================
-#  FUNÇÕES DE SUPORTE AO BANCO DE DADOS (OTIMIZADAS)
+#  FUNÇÕES DE SUPORTE AO BANCO DE DADOS
 # ==========================================
 
 def obter_conexao_banco():
@@ -80,7 +79,6 @@ def verificar_e_registrar_usuario(id_whatsapp):
 
 
 def verificar_assinatura_ativa(id_whatsapp):
-    """Verifica se o usuário tem o plano ativo e se está dentro da validade."""
     id_limpo = str(id_whatsapp).replace("whatsapp:", "").strip()
     conn = obter_conexao_banco()
     if not conn:
@@ -104,12 +102,11 @@ def verificar_assinatura_ativa(id_whatsapp):
             conn.close()
 
 
-def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro):
+def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro, lista_itens=None):
     id_limpo = str(id_whatsapp).replace("whatsapp:", "").strip()
     verificar_e_registrar_usuario(id_limpo)
 
     try:
-        # Sanatização avançada de valor para lidar com caracteres residuais de moedas (€, $, R$)
         if isinstance(valor, str):
             valor = re.sub(r"[^\d.,]", "", valor)
             if "," in valor and "." in valor:
@@ -118,8 +115,7 @@ def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro
                 valor = valor.replace(",", ".")
         valor_numerico = float(valor) if valor else 0.0
     except (ValueError, TypeError):
-        print(
-            f"⚠️ Aviso: Valor '{valor}' inválido recebido. Convertido para 0.0 para evitar quebra.")
+        print(f"⚠️ Aviso: Valor '{valor}' inválido recebido. Convertido para 0.0.")
         valor_numerico = 0.0
 
     conn = obter_conexao_banco()
@@ -128,12 +124,33 @@ def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro
     try:
         with conn:
             with conn.cursor() as cursor:
+                # Inserção principal retornando o ID gerado
                 cursor.execute(
                     """INSERT INTO transacoes (id_whatsapp, tipo, valor, local, categoria, texto_puro)
-                       VALUES (%s, %s, %s, %s, %s, %s);""",
+                       VALUES (%s, %s, %s, %s, %s, %s) RETURNING id;""",
                     (id_limpo, tipo, valor_numerico, local, category, texto_puro)
                 )
-        print("💾 Gravado com sucesso no PostgreSQL!")
+                transacao_id = cursor.fetchone()[0]
+                
+                # Se houver itens detalhados extraídos pela IA, salva na tabela filha
+                if lista_itens and isinstance(lista_itens, list):
+                    for item in lista_itens:
+                        try:
+                            orig = item.get("original", "Item desconhecido")
+                            trad = item.get("traduzido", orig)
+                            qtd = int(item.get("qtd", 1))
+                            p_un = float(item.get("preco_un", 0.0))
+                            p_tot = float(item.get("total", p_un * qtd))
+                            
+                            cursor.execute(
+                                """INSERT INTO itens_transacao (transacao_id, nome_original, nome_traduzido, quantidade, preco_unitario, preco_total)
+                                   VALUES (%s, %s, %s, %s, %s, %s);""",
+                                (transacao_id, orig, trad, qtd, p_un, p_tot)
+                            )
+                        except Exception as e_item:
+                            print(f"⚠️ Erro ao inserir item individual da compra: {e_item}")
+
+        print("💾 Transação completa e itens gravados com sucesso no PostgreSQL!")
         return True
     except Exception as e:
         print(f"❌ Erro ao inserir transação no PostgreSQL: {e}")
@@ -160,15 +177,15 @@ def verificar_se_e_comando_resumo(texto):
         return False
 
     palavra_limpa = texto.strip().lower()
-    if palavra_limpa in ["resumo", "relatorio", "relatório", "contador", "summary"]:
+    if palabra_limpa in ["resumo", "relatorio", "relatório", "contador", "summary"]:
         return True
 
     if not ai_client:
         return False
 
     prompt = (
-        "Atue como um classificador de intenção linguística de alta precisão.\n"
-        "Analise a mensagem enviada pelo usuário e determine se ele está solicitando um resumo, relatório, extrato ou balanço de finanças.\n"
+        "Atue como um classificador de intenção linguística de alta precisão de nível global.\n"
+        "Analise a mensagem enviada pelo usuário in qualquer idioma e determine se ele está solicitando um resumo, relatório, extrato ou balanço de finanças.\n"
         "Se for um lançamento de despesa comum ou uma notificação bancária recebida, responda obrigatoriamente false.\n\n"
         f"Mensagem do usuário: \"{texto}\"\n\n"
         "Responda estritamente com um JSON no seguinte formato:\n"
@@ -184,8 +201,7 @@ def verificar_se_e_comando_resumo(texto):
                 response_mime_type="application/json"
             ),
         )
-        texto_limpo = resposta.text.strip().replace(
-            "```json", "").replace("```", "").strip()
+        texto_limpo = resposta.text.strip().replace("```json", "").replace("```", "").strip()
         dados = json.loads(texto_limpo)
         return dados.get("e_resumo", False)
     except Exception as e:
@@ -195,24 +211,26 @@ def verificar_se_e_comando_resumo(texto):
 
 def inteligencia_universal_gemini(texto_ou_transcricao):
     if not ai_client or not texto_ou_transcricao:
-        return "Saída", "", "Desconhecido", "🛒 Outros Gastos"
+        return "Saída", "", "Desconhecido", "🛒 Outros Gastos", None, "pt"
 
     prompt = (
-        "Atue como um analista financeiro e extrator de dados bancários de altíssima precisão.\n"
-        "Analise o texto fornecido pelo usuário. Este texto pode ser uma frase direta ou uma NOTIFICAÇÃO AUTOMÁTICA de banco, SMS bancário, Google Pay ou Apple Pay.\n"
-        "Extraia os dados estritamente corretos da transação financeira.\n\n"
+        "Atue como um analista financeiro multilíngue de altíssima precisão.\n"
+        "Analise o texto fornecido pelo usuário (pode estar em português, espanhol, catalão, inglês, francês, russo, chinês, japonês, etc).\n"
+        "Identifique e extraia os dados fundamentais da transação financeira.\n\n"
         "Regras cruciais:\n"
-        "1. Identifique o tipo: 'Entrada' se for ganho/salário/reembolso/transferência recebida, 'Saída' se for gasto/compra/pagamento/débito.\n"
-        "2. Identifique o valor numérico exato (use sempre ponto como separador decimal, ex: 9.55). Nunca confunda o valor da compra com saldo restante ou dados parciais do cartão.\n"
-        "3. Identifique o Local/Estabelecimento de forma limpa. Remova termos técnicos como 'S.A.', 'TPA', 'COMPRA', 'ONLINE', 'CÁGADO' (ex: 'Mercadona S.A.' vira apenas 'Mercadona').\n"
-        "4. Atribua uma categoria coerente baseada no local ou produto acompanhada de um emoji adequado.\n\n"
+        "1. Identifique o tipo: 'Entrada' se for ganho/salário/reembolso, 'Saída' se for gasto/compra/pagamento.\n"
+        "2. Identifique o valor numérico exato com ponto decimal.\n"
+        "3. Limpe o nome do Estabelecimento comercial.\n"
+        "4. Atribua uma categoria coerente acompanhada de um emoji adequado.\n"
+        "5. Identifique o IDIOMA em que o usuário enviou a mensagem (ex: 'pt', 'es', 'en', 'fr', 'ru', 'zh', 'ja').\n\n"
         f"Texto para análise: \"{texto_ou_transcricao}\"\n\n"
         "Formatos JSON estrito exigido:\n"
         "{\n"
         '  "tipo": "Entrada" ou "Saída",\n'
-        '  "valor": "apenas números (ex: 9.55)",\n'
+        '  "valor": "9.55",\n'
         '  "local": "Nome limpo do estabelecimento",\n'
-        '  "categoria": "Emoji + Nome da Categoria"\n'
+        '  "categoria": "Emoji + Categoria",\n'
+        '  "idioma_usuario": "código do idioma detetado"\n'
         "}"
     )
     try:
@@ -223,71 +241,76 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
                 response_mime_type="application/json"
             ),
         )
-        texto_limpo = resposta.text.strip().replace(
-            "```json", "").replace("```", "").strip()
+        texto_limpo = resposta.text.strip().replace("```json", "").replace("```", "").strip()
         dados = json.loads(texto_limpo)
 
         return (
             dados.get("tipo", "Saída"),
             dados.get("valor", ""),
             dados.get("local", "Desconhecido"),
-            dados.get("categoria", "🛒 Outros Gastos")
+            dados.get("categoria", "🛒 Outros Gastos"),
+            dados.get("idioma_usuario", "pt")
         )
     except Exception as e:
         print(f"❌ Erro na análise de texto do Gemini: {e}")
-        # Fallback inteligente se a IA falhar: captura o valor monetário de forma mais segura
         valores = re.findall(r"\d+(?:[.,]\d+)?", texto_ou_transcricao)
-        valor_descoberto = ""
-        if valores:
-            # Filtra possíveis números longos como números de cartões ou horários
-            filtrados = [v for v in valores if len(
-                v.replace('.', '').replace(',', '')) <= 6]
-            valor_descoberto = filtrados[0].replace(
-                ",", ".") if filtrados else valores[0].replace(",", ".")
-        return "Saída", valor_descoberto, "Não especificado", "🛒 Outros Gastos"
+        v = valores[0].replace(",", ".") if valores else ""
+        return "Saída", v, "Não especificado", "🛒 Outros Gastos", "pt"
 
 
 def processar_midia_url(url_midia, mime_type):
     if not ai_client:
-        return ""
+        return {}
     eh_audio = "audio" in mime_type
     ext = "ogg" if eh_audio else "jpg"
     arquivo_temp = f"/tmp/temp_twilio_media.{ext}"
     try:
-        resposta = requests.get(url_midia, auth=(
-            TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
+        resposta = requests.get(url_midia, auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
         with open(arquivo_temp, "wb") as f:
             f.write(resposta.content)
 
         midia_gemini = ai_client.files.upload(file=arquivo_temp)
 
         if eh_audio:
-            prompt = "Transcreva este áudio com atenção aos valores e locais mencionados."
+            prompt = "Transcreva este áudio com atenção aos valores e locais mencionados. Preserve a linguagem natural."
             resposta_gemini = ai_client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=[midia_gemini, prompt]
             )
-            return resposta_gemini.text.strip()
+            return {"texto_puro": resposta_gemini.text.strip()}
         else:
             prompt = (
-                "Você é um leitor óptico (OCR) financeiro avançado.\n"
-                "Analise este talão de compra / recibo / fatura simplificada.\n"
-                "Extraia o valor TOTAL da compra e o nome do estabelecimento.\n"
-                "Formate a sua resposta como uma frase simples para que o bot possa processar nativamente, no seguinte formato exato:\n"
-                "Gastei [VALOR TOTAL] no [ESTABELECIMENTO]\n\n"
-                "Exemplo de saída esperada: Gastei 9.55 no Mercadona"
+                "Você é um leitor óptico (OCR) financeiro universal de última geração.\n"
+                "Analise este talão de compra / recibo / fatura simplificada de qualquer lugar do mundo (Catalunha, Espanha, Rússia, Japão, etc).\n"
+                "1. Extraia o valor TOTAL da compra e o nome limpo do estabelecimento.\n"
+                "2. Extraia TODOS os produtos comprados da lista.\n"
+                "3. IMPORTANTE: Identifique o idioma do talão e TRADUZA o nome de cada item automaticamente para o idioma do usuário. Se o talão estiver em Catalão/Espanhol (ex: Figueres), traduza os itens de forma precisa (ex: 'Bossa plastic' -> 'Saco Plástico', 'Cigró M.Cuit' -> 'Grão-de-bico Cozido'). Se o talão for de outro país, traduza para o idioma correspondente ou português por padrão.\n"
+                "4. Identifique o idioma de resposta adequado baseado no contexto do usuário.\n\n"
+                "Retorne estritamente um objeto JSON estruturado como o modelo abaixo:\n"
+                "{\n"
+                '  "local": "Nome limpo do estabelecimento",\n'
+                '  "total": "Valor total numérico (ex: 5.45)",\n'
+                '  "categoria": "Emoji + Nome da Categoria Coerente",\n'
+                '  "idioma_usuario": "pt",\n'
+                '  "itens": [\n'
+                '     {"original": "NOME ORIGINAL", "traduzido": "NOME TRADUZIDO", "qtd": 1, "preco_un": 1.20, "total": 1.20}\n'
+                '  ]\n'
+                "}"
             )
             resposta_gemini = ai_client.models.generate_content(
                 model="gemini-2.5-flash",
-                contents=[midia_gemini, prompt]
+                contents=[midia_gemini, prompt],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                ),
             )
-            resultado_imagem = resposta_gemini.text.strip()
-            print(f"📸 Resultado do OCR da imagem: {resultado_imagem}")
-            return resultado_imagem
+            texto_json = resposta_gemini.text.strip().replace("```json", "").replace("```", "").strip()
+            print(f"📸 Resposta JSON Estruturada do Gemini para Imagem: {texto_json}")
+            return json.loads(texto_json)
 
     except Exception as e:
         print(f"❌ Erro ao processar mídia: {e}")
-        return ""
+        return {}
     finally:
         try:
             if 'midia_gemini' in locals():
@@ -297,10 +320,23 @@ def processar_midia_url(url_midia, mime_type):
         if os.path.exists(arquivo_temp):
             os.remove(arquivo_temp)
 
+
+def traduzir_resposta_vios(mensagem_base, idioma_destino):
+    """Garante que as mensagens do Vio cheguem no idioma nativo do utilizador"""
+    if not ai_client or idioma_destino == "pt":
+        return mensagem_base
+        
+    prompt = f"Traduza a seguinte mensagem do sistema financeiro para o idioma correspondente ao código '{idioma_destino}'. Mantenha a formatação Markdown e os Emojis intocados:\n\n{mensagem_base}"
+    try:
+        res = ai_client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+        return res.text.strip()
+    except Exception:
+        return mensagem_base
+
+
 # ==========================================
 #  ROTA: GERADOR E DOWNLOAD DE EXCEL/CSV
 # ==========================================
-
 
 @app.route("/download/<id_usuario>", methods=["GET"])
 def download_relatorio(id_usuario):
@@ -308,8 +344,7 @@ def download_relatorio(id_usuario):
     conn = obter_conexao_banco()
     if conn:
         try:
-            id_com_mais = "+" + \
-                id_usuario if not id_usuario.startswith("+") else id_usuario
+            id_com_mais = "+" + id_usuario if not id_usuario.startswith("+") else id_usuario
             id_sem_mais = id_usuario.replace("+", "")
 
             with conn.cursor() as cursor:
@@ -323,13 +358,10 @@ def download_relatorio(id_usuario):
 
             with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
                 writer = csv.writer(f, delimiter=";")
-                writer.writerow(
-                    ["Data", "Tipo", "Valor", "Local/Estabelecimento", "Categoria"])
+                writer.writerow(["Data", "Tipo", "Valor", "Local/Estabelecimento", "Categoria"])
                 for row in linhas:
-                    data_formatada = row[0].strftime(
-                        "%d/%m/%Y %H:%M") if isinstance(row[0], datetime) else row[0]
-                    writer.writerow(
-                        [data_formatada, row[1], f"{row[2]:.2f}", row[3], row[4]])
+                    data_formatada = row[0].strftime("%d/%m/%Y %H:%M") if isinstance(row[0], datetime) else row[0]
+                    writer.writerow([data_formatada, row[1], f"{row[2]:.2f}", row[3], row[4]])
 
             return send_file(csv_path, mimetype="text/csv", as_attachment=True, download_name=f"Vio_Extrato_{id_usuario}.csv")
         except Exception as e:
@@ -344,7 +376,6 @@ def download_relatorio(id_usuario):
 # ==========================================
 @app.route("/")
 def index():
-    # Estrutura HTML limpa, sem o prefixo 'f' para evitar conflito com as chaves do Tailwind
     html_landing_page = """
     <!DOCTYPE html>
     <html lang="pt">
@@ -366,14 +397,14 @@ def index():
 
         <section class="max-w-5xl mx-auto px-6 pt-16 pb-12 text-center">
             <div class="flex justify-center mb-8">
-                <img src=https://github.com/terciomoreira/vio-app/blob/main/static/logo-vio.jpeg.jpeg?raw=true alt="Logo Vio" class="w-40 h-auto rounded-2xl shadow-xl shadow-blue-500/5 border border-gray-800">
+                <img src="https://github.com/terciomoreira/vio-app/blob/main/static/logo-vio.jpeg.jpeg?raw=true" alt="Logo Vio" class="w-40 h-auto rounded-2xl shadow-xl shadow-blue-500/5 border border-gray-800">
             </div>
             
             <h1 class="text-4xl md:text-6xl font-black tracking-tight leading-none bg-gradient-to-r from-white via-blue-100 to-blue-400 bg-clip-text text-transparent">
                 O Seu Gestor Financeiro<br class="hidden md:block"> por Voz
             </h1>
             <p class="mt-6 text-lg md:text-xl text-gray-400 max-w-2xl mx-auto font-normal leading-relaxed">
-                Controle todas as suas despesas e ganhos enviando apenas mensagens de áudio ou texto no WhatsApp. Inteligência artificial pura, sem complicações.
+                Controla todas as tuas despesas e ganhos enviando apenas mensagens de áudio ou texto no WhatsApp. Inteligência artificial pura, sem complicações.
             </p>
             <div class="mt-10">
                 <a href="#precos" class="inline-block bg-blue-600 hover:bg-blue-500 text-white font-bold px-8 py-4 rounded-xl text-lg transition duration-200 shadow-xl shadow-blue-600/20 transform hover:-translate-y-0.5">
@@ -382,7 +413,60 @@ def index():
             </div>
         </section>
 
-        <section class="max-w-4xl mx-auto px-6 py-10">
+        <!-- SECÇÃO ATUALIZADA: INSTRUÇÕES DETALHADAS DE USO -->
+        <section class="max-w-4xl mx-auto px-6 py-12">
+            <div class="text-center mb-10">
+                <h2 class="text-2xl md:text-3xl font-extrabold tracking-tight bg-gradient-to-r from-white to-gray-400 bg-clip-text text-transparent">
+                    Como funciona? É incrivelmente simples
+                </h2>
+                <p class="text-gray-400 mt-2 text-sm md:text-base">Esquece planilhas chatas e apps complexos. Fala com o Vio como falas com um amigo.</p>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="bg-[#080d1f] border border-gray-800 rounded-2xl p-6 hover:border-blue-500/30 transition duration-300">
+                    <div class="flex items-center space-x-3 mb-3">
+                        <span class="text-2xl">🎙️</span>
+                        <h4 class="font-bold text-white tracking-wide">Por Voz ou Texto</h4>
+                    </div>
+                    <p class="text-gray-400 text-sm leading-relaxed">
+                        Envia um áudio natural ou mensagem de texto no WhatsApp dizendo o que ganhaste ou gastaste. <br>
+                        <span class="text-blue-400 font-medium italic mt-1 block">Ex: "Recebi 1500€ de salário hoje" ou "Paguei 12.50€ no almoço".</span>
+                    </p>
+                </div>
+
+                <div class="bg-[#080d1f] border border-gray-800 rounded-2xl p-6 hover:border-blue-500/30 transition duration-300">
+                    <div class="flex items-center space-x-3 mb-3">
+                        <span class="text-2xl">📸</span>
+                        <h4 class="font-bold text-white tracking-wide">Fotos de Faturas e Recibos</h4>
+                    </div>
+                    <p class="text-gray-400 text-sm leading-relaxed">
+                        Tira uma foto de qualquer talão de compra. O Vio faz a leitura inteligente completa (OCR), extrai o total, categoriza e lista detalhadamente os produtos no banco.
+                    </p>
+                </div>
+
+                <div class="bg-[#080d1f] border border-gray-800 rounded-2xl p-6 hover:border-blue-500/30 transition duration-300">
+                    <div class="flex items-center space-x-3 mb-3">
+                        <span class="text-2xl">📊</span>
+                        <h4 class="font-bold text-white tracking-wide">Comandos de Resumo Instantâneo</h4>
+                    </div>
+                    <p class="text-gray-400 text-sm leading-relaxed">
+                        Escreve ou diz a palavra <span class="text-indigo-400 font-semibold">"Resumo"</span> para receber um balanço. Podes refinar por tempo adicionando <span class="text-indigo-400 italic">"Semana", "Trimestre" ou "Ano"</span>.
+                    </p>
+                </div>
+
+                <div class="bg-[#080d1f] border border-gray-800 rounded-2xl p-6 hover:border-blue-500/30 transition duration-300">
+                    <div class="flex items-center space-x-3 mb-3">
+                        <span class="text-2xl">🌍</span>
+                        <h4 class="font-bold text-white tracking-wide">Suporte Multilíngue Inteligente</h4>
+                    </div>
+                    <p class="text-gray-400 text-sm leading-relaxed">
+                        O Vio deteta o idioma da mensagem ou do talão automaticamente (seja Inglês, Espanhol, Catalão ou Russo), processa e responde-te sempre na tua língua nativa.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <section class="max-w-4xl mx-auto px-6 py-4">
             <div class="bg-[#090f24] rounded-2xl border border-gray-800/60 p-8 shadow-2xl relative overflow-hidden group">
                 <div class="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-blue-500 to-transparent"></div>
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-8 text-center relative z-10">
@@ -459,8 +543,7 @@ def stripe_webhook():
             id_whatsapp = sessao.get("metadata", {}).get("id_whatsapp")
 
             if id_whatsapp:
-                id_limpo = str(id_whatsapp).replace(
-                    "whatsapp:", "").replace("+", "").strip()
+                id_limpo = str(id_whatsapp).replace("whatsapp:", "").replace("+", "").strip()
                 conn = obter_conexao_banco()
                 if conn:
                     try:
@@ -471,11 +554,9 @@ def stripe_webhook():
                                     SET plano_ativo = TRUE, data_validade = CURRENT_TIMESTAMP + INTERVAL '30 days'
                                     WHERE id_whatsapp = %s;
                                 """, (id_limpo,))
-                        print(
-                            f"🚀 Usuário {id_limpo} ativado via Stripe com sucesso!")
+                        print(f"🚀 Usuário {id_limpo} ativado via Stripe com sucesso!")
                     except Exception as err:
-                        print(
-                            f"❌ Erro ao atualizar plano no banco via webhook: {err}")
+                        print(f"❌ Erro ao atualizar plano no banco via webhook: {err}")
                     finally:
                         conn.close()
 
@@ -486,7 +567,7 @@ def stripe_webhook():
 
 
 # ==========================================
-#  WEBHOOK DO TWILIO
+#  WEBHOOK DO TWILIO (MECANISMO CENTRAL VIO)
 # ==========================================
 
 @app.route("/webhook", methods=["POST"])
@@ -500,7 +581,6 @@ def twilio_webhook():
         texto_recebido = str(texto_recebido).strip()
 
     id_usuario = remetente.replace("whatsapp:", "").replace("+", "").strip()
-
     verificar_e_registrar_usuario(id_usuario)
 
     if not verificar_assinatura_ativa(id_usuario):
@@ -508,29 +588,65 @@ def twilio_webhook():
         twiml_resp.message(
             "🚫 *Vio:* O teu período de teste terminou ou a tua assinatura expirou.\n\n"
             "Para continuares a gerir as tuas finanças com inteligência artificial por apenas *5,90€/mês*, "
-            "renova a tua conta aqui: https://vio-app-1.onrender.com"
+            "renova a tua conta aqui: https://financeiro-bot.onrender.com"
         )
         return str(twiml_resp)
 
-    if url_midia:
-        texto_transcrito = processar_midia_url(url_midia, mime_type)
-        if texto_transcrito:
-            texto_recebido = texto_transcrito
+    idioma_contexto = "pt"
+    lista_itens_extraidos = None
 
+    # Se receber Imagem ou Áudio
+    if url_midia:
+        resultado_midia = processar_midia_url(url_midia, mime_type)
+        if isinstance(resultado_midia, dict):
+            # Se for imagem processada pelo novo leitor estruturado JSON
+            if "total" in resultado_midia:
+                v_total = resultado_midia.get("total")
+                v_local = resultado_midia.get("local", "Desconhecido")
+                v_cat = resultado_midia.get("categoria", "🛒 Outros Gastos")
+                idioma_contexto = resultado_midia.get("idioma_usuario", "pt")
+                lista_itens_extraidos = resultado_midia.get("itens", [])
+                
+                # Monta a frase virtual para salvar o texto_puro coerente
+                texto_recebido = f"Gastei {v_total} no {v_local}"
+            else:
+                texto_recebido = resultado_midia.get("texto_puro", "")
+        else:
+            texto_recebido = str(resultado_midia)
+
+    # 1. LOGICA DE COMANDO DE RESUMO (SISTEMA DE SUPERPODERES ACIONADO)
     if texto_recebido and verificar_se_e_comando_resumo(texto_recebido):
+        mensagem_min = texto_recebido.lower()
+        
+        # Filtros de tempo padrão e dinâmicos para PostgreSQL
+        query_filtro = "data_transacao >= DATE_TRUNC('month', NOW())"
+        periodo_texto = "deste mês"
+        
+        if "semana" in mensagem_min:
+            query_filtro = "data_transacao >= NOW() - INTERVAL '7 days'"
+            periodo_texto = "dos últimos 7 dias"
+        elif "trimestre" in mensagem_min:
+            query_filtro = "data_transacao >= NOW() - INTERVAL '3 months'"
+            periodo_texto = "dos últimos 3 meses"
+        elif "ano" in mensagem_min or "anual" in mensagem_min:
+            query_filtro = "data_transacao >= NOW() - INTERVAL '1 year'"
+            periodo_texto = "deste último ano"
+        elif "5 anos" in mensagem_min:
+            query_filtro = "data_transacao >= NOW() - INTERVAL '5 years'"
+            periodo_texto = "dos últimos 5 anos"
+
         conn = obter_conexao_banco()
         if conn:
             try:
-                id_com_mais = "+" + \
-                    id_usuario if not id_usuario.startswith(
-                        "+") else id_usuario
+                id_com_mais = "+" + id_usuario if not id_usuario.startswith("+") else id_usuario
                 id_sem_mais = id_usuario.replace("+", "")
 
                 with conn.cursor() as cursor:
-                    cursor.execute("""
+                    # Executa a query injetando dinamicamente o intervalo temporal correto
+                    cursor.execute(f"""
                         SELECT categoria, SUM(valor) 
                         FROM transacoes 
-                        WHERE tipo = 'Saída' AND (id_whatsapp = %s OR id_whatsapp = %s)
+                        WHERE tipo = 'Saída' AND (id_whatsapp = %s OR id_whatsapp = %s) AND {query_filtro}
                         GROUP BY categoria 
                         ORDER BY SUM(valor) DESC;
                     """, (id_com_mais, id_sem_mais))
@@ -540,7 +656,7 @@ def twilio_webhook():
                 msg = twiml_resp.message()
 
                 if linhas:
-                    resposta_texto = "📊 *Vio: Aqui está o teu Resumo Financeiro!*\n\n"
+                    resposta_texto = f"📊 *Vio: Aqui está o teu Resumo Financeiro {periodo_texto}!*\n\n"
                     total_geral = 0
                     for cat, val in linhas:
                         categoria_nome = cat if cat else "🛒 Outros Gastos"
@@ -550,45 +666,53 @@ def twilio_webhook():
 
                     host_app = request.host_url.rstrip('/')
                     link_download = f"{host_app}/download/{id_usuario}"
+                    resposta_texto += f"\n\n📥 *Descarrega o Excel consolidado:* {link_download}"
 
-                    resposta_texto += "\n\n📄 _O arquivo completo em Excel foi consolidado para o teu Contador!_"
-                    resposta_texto += f"\n📥 *Clica aqui para descarregar:* {link_download}"
-
-                    msg.body(resposta_texto)
-                    msg.media(link_download)
+                    resposta_final = traduzir_resposta_vios(resposta_texto, idioma_contexto)
+                    msg.body(resposta_final)
                 else:
-                    resposta_texto = "📊 *Vio:* Ainda não encontrei nenhuma despesa registada para o teu número no banco de dados."
-                    msg.body(resposta_texto)
+                    resposta_texto = f"📊 *Vio:* Não encontrei nenhuma despesa registada {periodo_texto}."
+                    msg.body(traduzir_resposta_vios(resposta_texto, idioma_contexto))
 
                 return str(twiml_resp)
 
             except Exception as e_banco:
-                resposta_texto = f"⚠️ *Vio:* Erro ao processar o teu resumo no banco: {e_banco}"
+                resposta_final = f"⚠️ *Vio:* Erro ao processar o teu resumo no banco: {e_banco}"
+                twiml_resp = MessagingResponse()
+                twiml_resp.message(resposta_final)
+                return str(twiml_resp)
             finally:
                 conn.close()
         else:
-            resposta_texto = "⚠️ *Vio:* O banco de dados está temporariamente inacessível."
+            twiml_resp = MessagingResponse()
+            twiml_resp.message("⚠️ *Vio:* O banco de dados está temporariamente inacessível.")
+            return str(twiml_resp)
 
-        twiml_resp = MessagingResponse()
-        twiml_resp.message(resposta_texto)
-        return str(twiml_resp)
-
+    # 2. LOGICA DE LANÇAMENTO COMUM (SEJA TEXTO DIRETO OU TRATADO VIA OCR)
     resposta_texto = ""
     if texto_recebido:
-        try:
-            tipo, v, l, c = inteligencia_universal_gemini(texto_recebido)
-        except Exception as e_gemini:
-            print(f"⚠️ Falha na IA, aplicando Fallback manual: {e_gemini}")
-            valores = re.findall(r"\d+(?:[.,]\d+)?", texto_recebido)
-            v = valores[0].replace(",", ".") if valores else ""
-            tipo, l, c = "Saída", "Não especificado", "🛒 Outros Gastos"
+        # Se os dados já não vieram pré-estruturados do OCR de imagem, corre a inteligência de texto pura
+        if lista_itens_extraidos is None:
+            try:
+                tipo, v, l, c, idioma_contexto = inteligencia_universal_gemini(texto_recebido)
+            except Exception as e_gemini:
+                print(f"⚠️ Falha na IA: {e_gemini}")
+                valores = re.findall(r"\d+(?:[.,]\d+)?", texto_recebido)
+                v = valores[0].replace(",", ".") if valores else ""
+                tipo, l, c = "Saída", "Não especificado", "🛒 Outros Gastos"
+        else:
+            # Caso os dados venham do OCR estruturado acima
+            valores_orig = re.findall(r"\d+(?:[.,]\d+)?", texto_recebido)
+            v = valores_orig[0].replace(",", ".") if valores_orig else "0.0"
+            tipo, l, c = "Saída", v_total, v_cat
 
         if v:
             if not l or l.lower() == "desconhecido":
                 l = "Não especificado"
 
+            # Salva na base de dados (passando a lista de itens traduzidos se houver)
             gravou_no_banco = salvar_transacao_banco(
-                id_whatsapp=id_usuario, tipo=tipo, valor=v, local=l, category=c, texto_puro=texto_recebido
+                id_whatsapp=id_usuario, tipo=tipo, valor=v, local=l, category=c, texto_puro=texto_recebido, lista_itens=lista_itens_extraidos
             )
 
             if not gravou_no_banco:
@@ -600,17 +724,26 @@ def twilio_webhook():
                 except Exception as e_file:
                     print(f"❌ Erro crítico no Fallback CSV: {e_file}")
 
+            # Geração do feedback final respeitando o idioma correspondente
             if tipo == "Entrada":
                 resposta_texto = f"💰 *Vio:* Entendi: *\"{texto_recebido}\"* -> Entrada de {v} em *({c})*."
             else:
                 resposta_texto = f"✅ *Vio:* Entendi: *\"{texto_recebido}\"* -> Despesa de {v} no {l} em *({c})*."
+                if lista_itens_extraidos:
+                    resposta_texto += f"\n\n📦 *Produtos Detetados ({len(lista_itens_extraidos)}):*"
+                    for it in lista_itens_extraidos[:6]:  # Exibe os primeiros 6 itens para não sobrecarregar o WhatsApp
+                        resposta_texto += f"\n• {it.get('traduzido')} ({it.get('qtd')}x) -> {it.get('total')} €"
+                    if len(lista_itens_extraidos) > 6:
+                        resposta_texto += f"\n_...e mais {len(lista_itens_extraidos) - 6} itens guardados no banco._"
         else:
-            resposta_texto = f"⚠️ *Vio:* Entendi: \"{texto_recebido}\", mas não consegui extrair os valores com precisão."
+            resposta_texto = f"⚠️ *Vio:* Entendi \"{texto_recebido}\", mas não consegui extrair os valores com precisão."
     else:
         resposta_texto = "⚠️ *Vio:* Recebi a tua mensagem, mas não consegui extrair nenhum conteúdo legível."
 
+    # Devolve a resposta traduzida para o idioma em uso
+    resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
     twiml_resp = MessagingResponse()
-    twiml_resp.message(resposta_texto)
+    twiml_resp.message(resposta_final_traduzida)
     return str(twiml_resp)
 
 
