@@ -728,7 +728,7 @@ def twilio_webhook():
             tipo, l, c = "Saída", v_total, v_cat
 
         if v:
-            if not l or l.lower() == "desconhecido":
+            if not l or str(l).lower() == "desconhecido":
                 l = "Não especificado"
 
             # Salva na base de dados (passando a lista de itens traduzidos se houver)
