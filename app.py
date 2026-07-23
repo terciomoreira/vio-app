@@ -539,7 +539,7 @@ def index():
                     </li>
                 </ul>
                 <div class="mt-8">
-                    <a href="#" class="block w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold py-3.5 px-4 rounded-xl transition duration-200 text-center shadow-lg shadow-indigo-600/10">
+                    <a href="https://buy.stripe.com/5kQ4gz2F2cA34S1dkm1Nu00" class="block w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold py-3.5 px-4 rounded-xl transition duration-200 text-center shadow-lg shadow-indigo-600/10">
                         Ativar Conta com Stripe 💳
                     </a>
                 </div>
