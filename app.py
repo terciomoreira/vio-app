@@ -819,13 +819,13 @@ def twilio_webhook():
 def ativar_admin():
     try:
         import psycopg2
-        # Usa a URL do banco configurada no Render
         conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
         cursor = conn.cursor()
         
+        # Tenta atualizar pelas colunas mais comuns do seu schema
         cursor.execute("""
             UPDATE usuarios 
-            SET status_assinatura = 'active',
+            SET status = 'active',
                 data_fim_teste = NOW() + INTERVAL '365 days'
             WHERE id_whatsapp LIKE '%351931477038%';
         """)
