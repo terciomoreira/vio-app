@@ -617,203 +617,199 @@ def stripe_webhook():
 
 @app.route("/whatsapp", methods=["POST"])
 def twilio_webhook():
-    remetente = request.form.get("From", "")
-    texto_recebido = request.form.get("Body", "")
-    url_midia = request.form.get("MediaUrl0", "")
-    mime_type = request.form.get("MediaContentType0", "")
+    try:
+        remetente = request.form.get("From", "")
+        texto_recebido = request.form.get("Body", "")
+        url_midia = request.form.get("MediaUrl0", "")
+        mime_type = request.form.get("MediaContentType0", "")
 
-    if texto_recebido:
-        texto_recebido = str(texto_recebido).strip()
+        if texto_recebido:
+            texto_recebido = str(texto_recebido).strip()
 
-    id_usuario = remetente.replace("whatsapp:", "").replace("+", "").strip()
-    verificar_e_registrar_usuario(id_usuario)
-    # Intersecção do comando desfazer
-    if texto_recebido:
-        mensagem_limpa = texto_recebido.lower()
-        if mensagem_limpa in ["desfazer", "apagar ultimo", "apagar último", "cancelar"]:
-            sucesso = apagar_ultima_transacao(id_usuario)
-            twiml_resp = MessagingResponse()
+        id_usuario = remetente.replace("whatsapp:", "").replace("+", "").strip()
+        verificar_e_registrar_usuario(id_usuario)
 
-            if sucesso:
-                twiml_resp.message(
-                    "🗑️ *Vio:* Feito! A tua última transação foi apagada com sucesso e já não conta para o teu resumo.")
-            else:
-                twiml_resp.message(
-                    "⚠️ *Vio:* Não encontrei nenhuma transação recente para apagar.")
-
-            return str(twiml_resp)
-        # Final da intersecção do comando desfazer
-
-    if not verificar_assinatura_ativa(id_usuario):
-        twiml_resp = MessagingResponse()
-        twiml_resp.message(
-            "🚫 *Vio:* O teu período de teste terminou ou a tua assinatura expirou.\n\n"
-            "Para continuares a gerir as tuas finanças com inteligência artificial por apenas *5,90€/mês* + IVA, "
-            "renova a tua conta aqui: https://vio.creariscoretech.com"
-        )
-        return str(twiml_resp)
-    idioma_contexto = "pt"
-    lista_itens_extraidos = None
-
-    # Se receber Imagem ou Áudio
-    if url_midia:
-        resultado_midia = processar_midia_url(url_midia, mime_type)
-        if isinstance(resultado_midia, dict):
-            # Se for imagem processada pelo novo leitor estruturado JSON
-            if "total" in resultado_midia:
-                v_total = resultado_midia.get("total")
-                v_local = resultado_midia.get("local", "Desconhecido")
-                v_cat = resultado_midia.get("categoria", "🛒 Outros Gastos")
-                idioma_contexto = resultado_midia.get("idioma_usuario", "pt")
-                lista_itens_extraidos = resultado_midia.get("itens", [])
-
-                # Monta a frase virtual para salvar o texto_puro coerente
-                texto_recebido = f"Gastei {v_total} no {v_local}"
-            else:
-                texto_recebido = resultado_midia.get("texto_puro", "")
-        else:
-            texto_recebido = str(resultado_midia)
-
-    # 1. LOGICA DE COMANDO DE RESUMO (SISTEMA DE SUPERPODERES ACIONADO)
-    if texto_recebido and verificar_se_e_comando_resumo(texto_recebido):
-        mensagem_min = texto_recebido.lower()
-
-        # Filtros de tempo padrão e dinâmicos para PostgreSQL
-        query_filtro = "data_transacao >= DATE_TRUNC('month', NOW())"
-        periodo_texto = "deste mês"
-
-        if "semana" in mensagem_min:
-            query_filtro = "data_transacao >= NOW() - INTERVAL '7 days'"
-            periodo_texto = "dos últimos 7 dias"
-        elif "trimestre" in mensagem_min:
-            query_filtro = "data_transacao >= NOW() - INTERVAL '3 months'"
-            periodo_texto = "dos últimos 3 meses"
-        elif "ano" in mensagem_min or "anual" in mensagem_min:
-            query_filtro = "data_transacao >= NOW() - INTERVAL '1 year'"
-            periodo_texto = "deste último ano"
-        elif "5 anos" in mensagem_min:
-            query_filtro = "data_transacao >= NOW() - INTERVAL '5 years'"
-            periodo_texto = "dos últimos 5 anos"
-
-        conn = obter_conexao_banco()
-        if conn:
-            try:
-                id_com_mais = "+" + \
-                    id_usuario if not id_usuario.startswith(
-                        "+") else id_usuario
-                id_sem_mais = id_usuario.replace("+", "")
-
-                with conn.cursor() as cursor:
-                    # Executa a query injetando dinamicamente o intervalo temporal correto
-                    cursor.execute(f"""
-                        SELECT categoria, SUM(valor) 
-                        FROM transacoes 
-                        WHERE tipo = 'Saída' AND (id_whatsapp = %s OR id_whatsapp = %s) AND {query_filtro}
-                        GROUP BY categoria 
-                        ORDER BY SUM(valor) DESC;
-                    """, (id_com_mais, id_sem_mais))
-                    linhas = cursor.fetchall()
-
+        # Intersecção do comando desfazer
+        if texto_recebido:
+            mensagem_limpa = texto_recebido.lower()
+            if mensagem_limpa in ["desfazer", "apagar ultimo", "apagar último", "cancelar"]:
+                sucesso = apagar_ultima_transacao(id_usuario)
                 twiml_resp = MessagingResponse()
-                msg = twiml_resp.message()
 
-                if linhas:
-                    resposta_texto = f"📊 *Vio: Aqui está o teu Resumo Financeiro {periodo_texto}!*\n\n"
-                    total_geral = 0
-                    for cat, val in linhas:
-                        categoria_nome = cat if cat else "🛒 Outros Gastos"
-                        resposta_texto += f"• {categoria_nome}: *{val:.2f} €*\n"
-                        total_geral += val
-                    resposta_texto += f"\n💰 *Total acumulado de Saídas:* *{total_geral:.2f} €*"
-
-                    host_app = request.host_url.rstrip('/')
-                    link_download = f"{host_app}/download/{id_usuario}"
-                    resposta_texto += f"\n\n📥 *Descarrega o Excel consolidado:* {link_download}"
-
-                    resposta_final = traduzir_resposta_vios(
-                        resposta_texto, idioma_contexto)
-                    msg.body(resposta_final)
+                if sucesso:
+                    twiml_resp.message(
+                        "🗑️ *Vio:* Feito! A tua última transação foi apagada com sucesso e já não conta para o teu resumo.")
                 else:
-                    resposta_texto = f"📊 *Vio:* Não encontrei nenhuma despesa registada {periodo_texto}."
-                    msg.body(traduzir_resposta_vios(
-                        resposta_texto, idioma_contexto))
+                    twiml_resp.message(
+                        "⚠️ *Vio:* Não encontrei nenhuma transação recente para apagar.")
 
                 return str(twiml_resp)
 
-            except Exception as e_banco:
-                resposta_final = f"⚠️ *Vio:* Erro ao processar o teu resumo no banco: {e_banco}"
-                twiml_resp = MessagingResponse()
-                twiml_resp.message(resposta_final)
-                return str(twiml_resp)
-            finally:
-                conn.close()
-        else:
+        if not verificar_assinatura_ativa(id_usuario):
             twiml_resp = MessagingResponse()
             twiml_resp.message(
-                "⚠️ *Vio:* O banco de dados está temporariamente inacessível.")
+                "🚫 *Vio:* O teu período de teste terminou ou a tua assinatura expirou.\n\n"
+                "Para continuares a gerir as tuas finanças com inteligência artificial por apenas *5,90€/mês* + IVA, "
+                "renova a tua conta aqui: https://vio.creariscoretech.com"
+            )
             return str(twiml_resp)
 
-    # 2. LOGICA DE LANÇAMENTO COMUM (SEJA TEXTO DIRETO OU TRATADO VIA OCR)
-    resposta_texto = ""
-    if texto_recebido:
-        # Se os dados já não vieram pré-estruturados do OCR de imagem, corre a inteligência de texto pura
-        if lista_itens_extraidos is None:
-            try:
-                tipo, v, l, c, idioma_contexto = inteligencia_universal_gemini(
-                    texto_recebido)
-            except Exception as e_gemini:
-                print(f"⚠️ Falha na IA: {e_gemini}")
-                valores = re.findall(r"\d+(?:[.,]\d+)?", texto_recebido)
-                v = valores[0].replace(",", ".") if valores else ""
-                tipo, l, c = "Saída", "Não especificado", "🛒 Outros Gastos"
-        else:
-            # Caso os dados venham do OCR estruturado acima
-            valores_orig = re.findall(r"\d+(?:[.,]\d+)?", texto_recebido)
-            v = valores_orig[0].replace(",", ".") if valores_orig else "0.0"
-            tipo, l, c = "Saída", v_total, v_cat
+        idioma_contexto = "pt"
+        lista_itens_extraidos = None
 
-        if v:
-            if not l or l.lower() == "desconhecido":
-                l = "Não especificado"
+        # Se receber Imagem ou Áudio
+        if url_midia:
+            resultado_midia = processar_midia_url(url_midia, mime_type)
+            if isinstance(resultado_midia, dict):
+                # Se for imagem processada pelo novo leitor estruturado JSON
+                if "total" in resultado_midia:
+                    v_total = resultado_midia.get("total")
+                    v_local = resultado_midia.get("local", "Desconhecido")
+                    v_cat = resultado_midia.get("categoria", "🛒 Outros Gastos")
+                    idioma_contexto = resultado_midia.get("idioma_usuario", "pt")
+                    lista_itens_extraidos = resultado_midia.get("itens", [])
 
-            # Salva na base de dados (passando a lista de itens traduzidos se houver)
-            gravou_no_banco = salvar_transacao_banco(
-                id_whatsapp=id_usuario, tipo=tipo, valor=v, local=l, category=c, texto_puro=texto_recebido, lista_itens=lista_itens_extraidos
-            )
-
-            if not gravou_no_banco:
-                try:
-                    csv_usuario = obter_arquivo_usuario(id_usuario)
-                    data_atual = datetime.now().strftime("%Y-%m-%d %H:%M")
-                    with open(csv_usuario, "a", encoding="utf-8") as f:
-                        f.write(f"{data_atual},{tipo},{v},{l},{c}\n")
-                except Exception as e_file:
-                    print(f"❌ Erro crítico no Fallback CSV: {e_file}")
-
-            # Geração do feedback final respeitando o idioma correspondente
-            if tipo == "Entrada":
-                resposta_texto = f"💰 *Vio:* Entendi: *\"{texto_recebido}\"* -> Entrada de {v} em *({c})*."
+                    # Atribuição correta das variáveis
+                    v = str(v_total)
+                    l = v_local
+                    c = v_cat
+                    tipo = "Saída"
+                    texto_recebido = f"Gastei {v} no {l}"
+                else:
+                    texto_recebido = resultado_midia.get("texto_puro", "")
             else:
-                resposta_texto = f"✅ *Vio:* Entendi: *\"{texto_recebido}\"* -> Despesa de {v} no {l} em *({c})*."
-                if lista_itens_extraidos:
-                    resposta_texto += f"\n\n📦 *Produtos Detetados ({len(lista_itens_extraidos)}):*"
-                    # Exibe os primeiros 6 itens para não sobrecarregar o WhatsApp
-                    for it in lista_itens_extraidos[:6]:
-                        resposta_texto += f"\n• {it.get('traduzido')} ({it.get('qtd')}x) -> {it.get('total')} €"
-                    if len(lista_itens_extraidos) > 6:
-                        resposta_texto += f"\n_...e mais {len(lista_itens_extraidos) - 6} itens guardados no banco._"
+                texto_recebido = str(resultado_midia)
+
+        # 1. LÓGICA DE COMANDO DE RESUMO
+        if texto_recebido and verificar_se_e_comando_resumo(texto_recebido):
+            mensagem_min = texto_recebido.lower()
+
+            query_filtro = "data_transacao >= DATE_TRUNC('month', NOW())"
+            periodo_texto = "deste mês"
+
+            if "semana" in mensagem_min:
+                query_filtro = "data_transacao >= NOW() - INTERVAL '7 days'"
+                periodo_texto = "dos últimos 7 dias"
+            elif "trimestre" in mensagem_min:
+                query_filtro = "data_transacao >= NOW() - INTERVAL '3 months'"
+                periodo_texto = "dos últimos 3 meses"
+            elif "ano" in mensagem_min or "anual" in mensagem_min:
+                query_filtro = "data_transacao >= NOW() - INTERVAL '1 year'"
+                periodo_texto = "deste último ano"
+            elif "5 anos" in mensagem_min:
+                query_filtro = "data_transacao >= NOW() - INTERVAL '5 years'"
+                periodo_texto = "dos últimos 5 anos"
+
+            conn = obter_conexao_banco()
+            if conn:
+                try:
+                    id_com_mais = "+" + id_usuario if not id_usuario.startswith("+") else id_usuario
+                    id_sem_mais = id_usuario.replace("+", "")
+
+                    with conn.cursor() as cursor:
+                        cursor.execute(f"""
+                            SELECT categoria, SUM(valor) 
+                            FROM transacoes 
+                            WHERE tipo = 'Saída' AND (id_whatsapp = %s OR id_whatsapp = %s) AND {query_filtro}
+                            GROUP BY categoria 
+                            ORDER BY SUM(valor) DESC;
+                        """, (id_com_mais, id_sem_mais))
+                        linhas = cursor.fetchall()
+
+                    twiml_resp = MessagingResponse()
+                    msg = twiml_resp.message()
+
+                    if linhas:
+                        resposta_texto = f"📊 *Vio: Aqui está o teu Resumo Financeiro {periodo_texto}!*\n\n"
+                        total_geral = 0
+                        for cat, val in linhas:
+                            categoria_nome = cat if cat else "🛒 Outros Gastos"
+                            resposta_texto += f"• {categoria_nome}: *{val:.2f} €*\n"
+                            total_geral += val
+                        resposta_texto += f"\n💰 *Total acumulado de Saídas:* *{total_geral:.2f} €*"
+
+                        host_app = request.host_url.rstrip('/')
+                        link_download = f"{host_app}/download/{id_usuario}"
+                        resposta_texto += f"\n\n📥 *Descarrega o Excel consolidado:* {link_download}"
+
+                        resposta_final = traduzir_resposta_vios(resposta_texto, idioma_contexto)
+                        msg.body(resposta_final)
+                    else:
+                        resposta_texto = f"📊 *Vio:* Não encontrei nenhuma despesa registada {periodo_texto}."
+                        msg.body(traduzir_resposta_vios(resposta_texto, idioma_contexto))
+
+                    return str(twiml_resp)
+
+                except Exception as e_banco:
+                    resposta_final = f"⚠️ *Vio:* Erro ao processar o teu resumo no banco: {e_banco}"
+                    twiml_resp = MessagingResponse()
+                    twiml_resp.message(resposta_final)
+                    return str(twiml_resp)
+                finally:
+                    conn.close()
+            else:
+                twiml_resp = MessagingResponse()
+                twiml_resp.message("⚠️ *Vio:* O banco de dados está temporariamente inacessível.")
+                return str(twiml_resp)
+
+        # 2. LÓGICA DE LANÇAMENTO COMUM
+        resposta_texto = ""
+        if texto_recebido:
+            if lista_itens_extraidos is None:
+                try:
+                    tipo, v, l, c, idioma_contexto = inteligencia_universal_gemini(texto_recebido)
+                except Exception as e_gemini:
+                    print(f"⚠️ Falha na IA: {e_gemini}")
+                    valores = re.findall(r"\d+(?:[.,]\d+)?", texto_recebido)
+                    v = valores[0].replace(",", ".") if valores else ""
+                    tipo, l, c = "Saída", "Não especificado", "🛒 Outros Gastos"
+
+            if v:
+                if not l or str(l).lower() == "desconhecido":
+                    l = "Não especificado"
+
+                # Salva na base de dados
+                gravou_no_banco = salvar_transacao_banco(
+                    id_whatsapp=id_usuario, tipo=tipo, valor=v, local=l, category=c, texto_puro=texto_recebido, lista_itens=lista_itens_extraidos
+                )
+
+                if not gravou_no_banco:
+                    try:
+                        csv_usuario = obter_arquivo_usuario(id_usuario)
+                        data_atual = datetime.now().strftime("%Y-%m-%d %H:%M")
+                        with open(csv_usuario, "a", encoding="utf-8") as f:
+                            f.write(f"{data_atual},{tipo},{v},{l},{c}\n")
+                    except Exception as e_file:
+                        print(f"❌ Erro crítico no Fallback CSV: {e_file}")
+
+                # Geração do feedback final
+                if tipo == "Entrada":
+                    resposta_texto = f"💰 *Vio:* Entendi: *\"{texto_recebido}\"* -> Entrada de {v}€ em *({c})*."
+                else:
+                    resposta_texto = f"✅ *Vio:* Entendi: *\"{texto_recebido}\"* -> Despesa de {v}€ no {l} em *({c})*."
+                    if lista_itens_extraidos:
+                        resposta_texto += f"\n\n📦 *Produtos Detetados ({len(lista_itens_extraidos)}):*"
+                        for it in lista_itens_extraidos[:6]:
+                            resposta_texto += f"\n• {it.get('traduzido')} ({it.get('qtd')}x) -> {it.get('total')} €"
+                        if len(lista_itens_extraidos) > 6:
+                            resposta_texto += f"\n_...e mais {len(lista_itens_extraidos) - 6} itens guardados no banco._"
+            else:
+                resposta_texto = f"⚠️ *Vio:* Entendi \"{texto_recebido}\", mas não consegui extrair os valores com precisão."
         else:
-            resposta_texto = f"⚠️ *Vio:* Entendi \"{texto_recebido}\", mas não consegui extrair os valores com precisão."
-    else:
-        resposta_texto = "⚠️ *Vio:* Recebi a tua mensagem, mas não consegui extrair nenhum conteúdo legível."
+            resposta_texto = "⚠️ *Vio:* Recebi a tua mensagem, mas não consegui extrair nenhum conteúdo legível."
 
-    # Devolve a resposta traduzida para o idioma em uso
-    resposta_final_traduzida = traduzir_resposta_vios(
-        resposta_texto, idioma_contexto)
-    twiml_resp = MessagingResponse()
-    twiml_resp.message(resposta_final_traduzida)
-    return str(twiml_resp)
+        resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
+        twiml_resp = MessagingResponse()
+        twiml_resp.message(resposta_final_traduzida)
+        return str(twiml_resp)
 
+    except Exception as e_geral:
+        print(f"❌ ERRO GRAVE NA ROTA WHATSAPP: {e_geral}")
+        import traceback
+        traceback.print_exc()
+        twiml_resp = MessagingResponse()
+        twiml_resp.message(f"⚠️ *Vio:* Ocorreu um erro ao processar a tua foto/mensagem: {e_geral}")
+        return str(twiml_resp)
 
 @app.route("/ativar-admin")
 def ativar_admin():
