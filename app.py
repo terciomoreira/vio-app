@@ -387,13 +387,15 @@ def download_relatorio(id_usuario):
         try:
             # Força o commit automático para garantir alterações de DDL
             conn.autocommit = True
-            
-            id_com_mais = "+" + id_usuario if not id_usuario.startswith("+") else id_usuario
+
+            id_com_mais = "+" + \
+                id_usuario if not id_usuario.startswith("+") else id_usuario
             id_sem_mais = id_usuario.replace("+", "")
 
             with conn.cursor() as cursor:
                 # 1. Garante que a coluna data_transacao existe no PostgreSQL
-                cursor.execute("ALTER TABLE transacoes ADD COLUMN IF NOT EXISTS data_transacao TIMESTAMP DEFAULT NOW();")
+                cursor.execute(
+                    "ALTER TABLE transacoes ADD COLUMN IF NOT EXISTS data_transacao TIMESTAMP DEFAULT NOW();")
 
                 # 2. Busca os dados para o relatório
                 cursor.execute("""
@@ -409,7 +411,8 @@ def download_relatorio(id_usuario):
 
             with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
                 writer = csv.writer(f, delimiter=";")
-                writer.writerow(["Data", "Tipo", "Valor (€)", "Local/Estabelecimento", "Categoria"])
+                writer.writerow(["Data", "Tipo", "Valor (€)",
+                                "Local/Estabelecimento", "Categoria"])
                 for row in linhas:
                     data_val = row[0]
                     if isinstance(data_val, datetime):
@@ -420,7 +423,8 @@ def download_relatorio(id_usuario):
                         data_formatada = "-"
 
                     valor_val = row[2] if row[2] is not None else 0.0
-                    writer.writerow([data_formatada, row[1], f"{valor_val:.2f}", row[3], row[4]])
+                    writer.writerow(
+                        [data_formatada, row[1], f"{valor_val:.2f}", row[3], row[4]])
 
             return send_file(csv_path, mimetype="text/csv", as_attachment=True, download_name=f"Vio_Extrato_{id_usuario}.csv")
         except Exception as e:
@@ -432,6 +436,8 @@ def download_relatorio(id_usuario):
 # ==========================================
 #  ROTA: LANDING PAGE OFICIAL DO VIO
 # ==========================================
+
+
 @app.route("/")
 def index():
     html_landing_page = """
@@ -728,7 +734,8 @@ def twilio_webhook():
 
                     with conn.cursor() as cursor:
                         # 🛠️ Linha adicionada para corrigir o erro no PostgreSQL:
-                        cursor.execute("ALTER TABLE transacoes ADD COLUMN IF NOT EXISTS data_transacao TIMESTAMP DEFAULT NOW();")
+                        cursor.execute(
+                            "ALTER TABLE transacoes ADD COLUMN IF NOT EXISTS data_transacao TIMESTAMP DEFAULT NOW();")
 
                         cursor.execute(f"""
                             SELECT categoria, SUM(valor) 
@@ -863,6 +870,42 @@ def ativar_admin():
         return "<h1>✅ Conta ativada com sucesso por 1 ano!</h1><p>Já podes enviar fotos no WhatsApp.</p>"
     except Exception as e:
         return f"<h1>Erro ao ativar:</h1><p>{str(e)}</p>"
+
+# ==========================================
+#  ROTA DE SUCESSO STRIPE (PÓS-PAGAMENTO)
+# ==========================================
+
+
+@app.route('/sucesso')
+def sucesso():
+    whatsapp_url = "https://wa.me/17543244066?text=Olá!%20Acabei%20de%20ativar%20minha%20conta."
+    return f'''
+    <!DOCTYPE html>
+    <html lang="pt">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Bem-vindo ao Vio Finance!</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+    </head>
+    <body class="bg-slate-950 text-white min-h-screen flex items-center justify-center p-4 font-sans">
+        <div class="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center shadow-2xl">
+            <div class="text-5xl mb-4">🚀</div>
+            <h1 class="text-2xl font-bold mb-2">Assinatura Confirmada!</h1>
+            <p class="text-gray-400 text-sm mb-6">A tua conta no Vio Finance está ativa. Enviamos uma cópia das tuas credenciais para o teu e-mail.</p>
+            
+            <a href="{whatsapp_url}" target="_blank" class="block w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3.5 px-6 rounded-xl transition duration-200 shadow-lg shadow-green-500/20 mb-4">
+                💬 Iniciar no WhatsApp
+            </a>
+
+            <div class="mt-6 pt-6 border-t border-slate-800 text-xs text-gray-400 space-y-2">
+                <p>Número Oficial do Vio: <br><span class="text-green-400 text-sm font-mono font-bold">+1 (754) 324-4066</span></p>
+                <p class="text-gray-500 text-[11px]">Guarda este número nos teus contactos para facilitar os teus registos diários.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    '''
 
 
 if __name__ == "__main__":
