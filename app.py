@@ -391,6 +391,9 @@ def download_relatorio(id_usuario):
             id_sem_mais = id_usuario.replace("+", "")
 
             with conn.cursor() as cursor:
+                # 🛠️ LINHA ADICIONADA AQUI: Garante que a coluna existe antes de fazer o SELECT
+                cursor.execute("ALTER TABLE transacoes ADD COLUMN IF NOT EXISTS data_transacao TIMESTAMP DEFAULT NOW();")
+
                 cursor.execute("""
                     SELECT data_transacao, tipo, valor, local, categoria 
                     FROM transacoes 
@@ -415,7 +418,6 @@ def download_relatorio(id_usuario):
         finally:
             conn.close()
     return "Banco offline", 500
-
 
 # ==========================================
 #  ROTA: LANDING PAGE OFICIAL DO VIO
