@@ -379,21 +379,23 @@ def traduzir_resposta_vios(mensagem_base, idioma_destino):
 # ==========================================
 #  ROTA: GERADOR E DOWNLOAD DE EXCEL/CSV
 # ==========================================
-
 @app.route("/download/<id_usuario>", methods=["GET"])
 def download_relatorio(id_usuario):
     csv_path = f"/tmp/extrato_{id_usuario}.csv"
     conn = obter_conexao_banco()
     if conn:
         try:
-            id_com_mais = "+" + \
-                id_usuario if not id_usuario.startswith("+") else id_usuario
+            # Força o commit automático para garantir alterações de DDL
+            conn.autocommit = True
+            
+            id_com_mais = "+" + id_usuario if not id_usuario.startswith("+") else id_usuario
             id_sem_mais = id_usuario.replace("+", "")
 
             with conn.cursor() as cursor:
-                # 🛠️ LINHA ADICIONADA AQUI: Garante que a coluna existe antes de fazer o SELECT
+                # 1. Garante que a coluna data_transacao existe no PostgreSQL
                 cursor.execute("ALTER TABLE transacoes ADD COLUMN IF NOT EXISTS data_transacao TIMESTAMP DEFAULT NOW();")
 
+                # 2. Busca os dados para o relatório
                 cursor.execute("""
                     SELECT data_transacao, tipo, valor, local, categoria 
                     FROM transacoes 
@@ -402,15 +404,23 @@ def download_relatorio(id_usuario):
                 """, (id_com_mais, id_sem_mais))
                 linhas = cursor.fetchall()
 
+            import csv
+            from datetime import datetime
+
             with open(csv_path, "w", encoding="utf-8-sig", newline="") as f:
                 writer = csv.writer(f, delimiter=";")
-                writer.writerow(
-                    ["Data", "Tipo", "Valor", "Local/Estabelecimento", "Categoria"])
+                writer.writerow(["Data", "Tipo", "Valor (€)", "Local/Estabelecimento", "Categoria"])
                 for row in linhas:
-                    data_formatada = row[0].strftime(
-                        "%d/%m/%Y %H:%M") if isinstance(row[0], datetime) else row[0]
-                    writer.writerow(
-                        [data_formatada, row[1], f"{row[2]:.2f}", row[3], row[4]])
+                    data_val = row[0]
+                    if isinstance(data_val, datetime):
+                        data_formatada = data_val.strftime("%d/%m/%Y %H:%M")
+                    elif data_val is not None:
+                        data_formatada = str(data_val)
+                    else:
+                        data_formatada = "-"
+
+                    valor_val = row[2] if row[2] is not None else 0.0
+                    writer.writerow([data_formatada, row[1], f"{valor_val:.2f}", row[3], row[4]])
 
             return send_file(csv_path, mimetype="text/csv", as_attachment=True, download_name=f"Vio_Extrato_{id_usuario}.csv")
         except Exception as e:
