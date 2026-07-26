@@ -822,42 +822,18 @@ def ativar_admin():
         conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
         cursor = conn.cursor()
 
-        # 1. Busca as colunas reais da tabela 'usuarios'
+        # Atualiza com as colunas reais descobertas
         cursor.execute("""
-            SELECT column_name 
-            FROM information_schema.columns 
-            WHERE table_name = 'usuarios';
+            UPDATE usuarios 
+            SET plano_ativo = TRUE,
+                data_validade = NOW() + INTERVAL '365 days'
+            WHERE id_whatsapp LIKE '%351931477038%';
         """)
-        colunas = [row[0] for row in cursor.fetchall()]
 
-        # 2. Descobre quais colunas existem para atualizar
-        updates = []
-
-        # Procura coluna de data de término
-        for col_data in ['data_fim_teste', 'data_expiracao', 'validade', 'expira_em', 'fim_teste']:
-            if col_data in colunas:
-                updates.append(f"{col_data} = NOW() + INTERVAL '365 days'")
-                break
-
-        # Procura coluna de status/plano
-        for col_status in ['status', 'status_assinatura', 'plano', 'ativo', 'assinatura']:
-            if col_status in colunas:
-                updates.append(f"{col_status} = 'active'")
-                break
-
-        if not updates:
-            cursor.close()
-            conn.close()
-            return f"<h1>Colunas encontradas:</h1><p>{', '.join(colunas)}</p>"
-
-        # 3. Executa o UPDATE com as colunas certas que foram encontradas
-        sql = f"UPDATE usuarios SET {', '.join(updates)} WHERE id_whatsapp LIKE '%351931477038%';"
-        cursor.execute(sql)
         conn.commit()
-
         cursor.close()
         conn.close()
-        return f"<h1>✅ Conta ativada com sucesso por 1 ano!</h1><p>Colunas atualizadas: {', '.join(updates)}</p>"
+        return "<h1>✅ Conta ativada com sucesso por 1 ano!</h1><p>Já podes enviar fotos no WhatsApp.</p>"
     except Exception as e:
         return f"<h1>Erro ao ativar:</h1><p>{str(e)}</p>"
 
