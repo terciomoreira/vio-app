@@ -648,11 +648,10 @@ def twilio_webhook():
         twiml_resp = MessagingResponse()
         twiml_resp.message(
             "🚫 *Vio:* O teu período de teste terminou ou a tua assinatura expirou.\n\n"
-            "Para continuares a gerir as tuas finanças com inteligência artificial por apenas *5,90€/mês*, "
-            "renova a tua conta aqui: https://financeiro-bot.onrender.com"
+            "Para continuares a gerir as tuas finanças com inteligência artificial por apenas *5,90€/mês* + IVA, "
+            "renova a tua conta aqui: https://vio.creariscoretech.com"
         )
         return str(twiml_resp)
-
     idioma_contexto = "pt"
     lista_itens_extraidos = None
 
