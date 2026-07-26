@@ -115,8 +115,7 @@ def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro
                 valor = valor.replace(",", ".")
         valor_numerico = float(valor) if valor else 0.0
     except (ValueError, TypeError):
-        print(
-            f"⚠️ Aviso: Valor '{valor}' inválido recebido. Convertido para 0.0.")
+        print(f"⚠️ Aviso: Valor '{valor}' inválido recebido. Convertido para 0.0.")
         valor_numerico = 0.0
 
     conn = obter_conexao_banco()
@@ -125,6 +124,9 @@ def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro
     try:
         with conn:
             with conn.cursor() as cursor:
+                # 🛠️ CORREÇÃO: Cria a coluna texto_puro se ela ainda não existir na tabela
+                cursor.execute("ALTER TABLE transacoes ADD COLUMN IF NOT EXISTS texto_puro TEXT;")
+
                 # Inserção principal retornando o ID gerado
                 cursor.execute(
                     """INSERT INTO transacoes (id_whatsapp, tipo, valor, local, categoria, texto_puro)
@@ -149,8 +151,7 @@ def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro
                                 (transacao_id, orig, trad, qtd, p_un, p_tot)
                             )
                         except Exception as e_item:
-                            print(
-                                f"⚠️ Erro ao inserir item individual da compra: {e_item}")
+                            print(f"⚠️ Erro ao inserir item individual da compra: {e_item}")
 
         print("💾 Transação completa e itens gravados com sucesso no PostgreSQL!")
         return True
@@ -160,7 +161,6 @@ def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro
     finally:
         if conn:
             conn.close()
-
 
 def apagar_ultima_transacao(id_whatsapp):
     """Procura e elimina a última transação inserida pelo usuário"""
