@@ -818,24 +818,24 @@ def twilio_webhook():
 @app.route("/ativar-admin")
 def ativar_admin():
     try:
-        conn = get_db_connection()
+        import psycopg2
+        # Usa a URL do banco configurada no Render
+        conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
         cursor = conn.cursor()
-
-        # Atualiza a assinatura e o trial do teu número
+        
         cursor.execute("""
             UPDATE usuarios 
             SET status_assinatura = 'active',
                 data_fim_teste = NOW() + INTERVAL '365 days'
             WHERE id_whatsapp LIKE '%351931477038%';
         """)
-
+        
         conn.commit()
         cursor.close()
         conn.close()
         return "<h1>✅ Conta ativada com sucesso por 1 ano!</h1><p>Já podes enviar fotos no WhatsApp.</p>"
     except Exception as e:
         return f"<h1>Erro ao ativar:</h1><p>{str(e)}</p>"
-
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
