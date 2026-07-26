@@ -536,9 +536,9 @@ def index():
                 <span class="absolute -top-3 left-1/2 transform -translate-x-1/2 bg-blue-600 text-xs uppercase font-extrabold px-3 py-1 rounded-full tracking-wider">Acesso Total</span>
                 <h3 class="text-xl font-bold text-gray-200 mt-2">Assinatura Mensal Vio</h3>
                 <div class="mt-6 flex justify-center items-baseline text-white">
-                    <span class="text-5xl font-black tracking-tight">5,90€</span>
-                    <span class="ml-1 text-lg text-gray-400">/mês</span>
-                </div>
+                 <span class="text-5xl font-black tracking-tight">5,90€</span>
+                 <span class="ml-2 text-lg text-gray-400 font-medium">/mês + IVA</span>
+              </div>
                 <ul class="mt-8 space-y-4 text-sm text-gray-300 text-left border-t border-gray-800/60 pt-6">
                     <li class="flex items-center space-x-3">
                         <span class="text-blue-400">✔</span> <span>Lançamentos por áudio e texto ilimitados</span>
