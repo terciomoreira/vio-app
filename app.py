@@ -1,17 +1,18 @@
-import os
-import json
-import csv
-import re
-from datetime import datetime
-import requests
-from flask import Flask, request, send_file, render_template_string
-from twilio.twiml.messaging_response import MessagingResponse
-from twilio.rest import Client
+from google.genai import types
+from google import genai
 import psycopg2  # Conector do PostgreSQL
+from twilio.rest import Client
+from twilio.twiml.messaging_response import MessagingResponse
+from flask import Flask, request, send_file, render_template_string
+import requests
+from datetime import datetime
+import re
+import csv
+import json
+import os
+-- Active: 1781974227496@@dpg-d8g3gkj7uimc73ft455g-a.oregon-postgres.render.com@5432
 
 # NOVA IMPORTAÇÃO OFICIAL DO GEMINI
-from google import genai
-from google.genai import types
 
 app = Flask(__name__, static_folder='static', static_url_path='/static')
 
@@ -813,6 +814,28 @@ def twilio_webhook():
     twiml_resp = MessagingResponse()
     twiml_resp.message(resposta_final_traduzida)
     return str(twiml_resp)
+
+
+@app.route("/ativar-admin")
+def ativar_admin():
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Atualiza a assinatura e o trial do teu número
+        cursor.execute("""
+            UPDATE usuarios 
+            SET status_assinatura = 'active',
+                data_fim_teste = NOW() + INTERVAL '365 days'
+            WHERE id_whatsapp LIKE '%351931477038%';
+        """)
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return "<h1>✅ Conta ativada com sucesso por 1 ano!</h1><p>Já podes enviar fotos no WhatsApp.</p>"
+    except Exception as e:
+        return f"<h1>Erro ao ativar:</h1><p>{str(e)}</p>"
 
 
 if __name__ == "__main__":
