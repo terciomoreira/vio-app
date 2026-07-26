@@ -115,7 +115,8 @@ def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro
                 valor = valor.replace(",", ".")
         valor_numerico = float(valor) if valor else 0.0
     except (ValueError, TypeError):
-        print(f"⚠️ Aviso: Valor '{valor}' inválido recebido. Convertido para 0.0.")
+        print(
+            f"⚠️ Aviso: Valor '{valor}' inválido recebido. Convertido para 0.0.")
         valor_numerico = 0.0
 
     conn = obter_conexao_banco()
@@ -125,7 +126,8 @@ def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro
         with conn:
             with conn.cursor() as cursor:
                 # 🛠️ CORREÇÃO: Cria a coluna texto_puro se ela ainda não existir na tabela
-                cursor.execute("ALTER TABLE transacoes ADD COLUMN IF NOT EXISTS texto_puro TEXT;")
+                cursor.execute(
+                    "ALTER TABLE transacoes ADD COLUMN IF NOT EXISTS texto_puro TEXT;")
 
                 # Inserção principal retornando o ID gerado
                 cursor.execute(
@@ -151,7 +153,8 @@ def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro
                                 (transacao_id, orig, trad, qtd, p_un, p_tot)
                             )
                         except Exception as e_item:
-                            print(f"⚠️ Erro ao inserir item individual da compra: {e_item}")
+                            print(
+                                f"⚠️ Erro ao inserir item individual da compra: {e_item}")
 
         print("💾 Transação completa e itens gravados com sucesso no PostgreSQL!")
         return True
@@ -161,6 +164,7 @@ def salvar_transacao_banco(id_whatsapp, tipo, valor, local, category, texto_puro
     finally:
         if conn:
             conn.close()
+
 
 def apagar_ultima_transacao(id_whatsapp):
     """Procura e elimina a última transação inserida pelo usuário"""
@@ -626,7 +630,8 @@ def twilio_webhook():
         if texto_recebido:
             texto_recebido = str(texto_recebido).strip()
 
-        id_usuario = remetente.replace("whatsapp:", "").replace("+", "").strip()
+        id_usuario = remetente.replace(
+            "whatsapp:", "").replace("+", "").strip()
         verificar_e_registrar_usuario(id_usuario)
 
         # Intersecção do comando desfazer
@@ -666,7 +671,8 @@ def twilio_webhook():
                     v_total = resultado_midia.get("total")
                     v_local = resultado_midia.get("local", "Desconhecido")
                     v_cat = resultado_midia.get("categoria", "🛒 Outros Gastos")
-                    idioma_contexto = resultado_midia.get("idioma_usuario", "pt")
+                    idioma_contexto = resultado_midia.get(
+                        "idioma_usuario", "pt")
                     lista_itens_extraidos = resultado_midia.get("itens", [])
 
                     # Atribuição correta das variáveis
@@ -703,10 +709,15 @@ def twilio_webhook():
             conn = obter_conexao_banco()
             if conn:
                 try:
-                    id_com_mais = "+" + id_usuario if not id_usuario.startswith("+") else id_usuario
+                    id_com_mais = "+" + \
+                        id_usuario if not id_usuario.startswith(
+                            "+") else id_usuario
                     id_sem_mais = id_usuario.replace("+", "")
 
                     with conn.cursor() as cursor:
+                        # 🛠️ Linha adicionada para corrigir o erro no PostgreSQL:
+                        cursor.execute("ALTER TABLE transacoes ADD COLUMN IF NOT EXISTS data_transacao TIMESTAMP DEFAULT NOW();")
+
                         cursor.execute(f"""
                             SELECT categoria, SUM(valor) 
                             FROM transacoes 
@@ -732,11 +743,13 @@ def twilio_webhook():
                         link_download = f"{host_app}/download/{id_usuario}"
                         resposta_texto += f"\n\n📥 *Descarrega o Excel consolidado:* {link_download}"
 
-                        resposta_final = traduzir_resposta_vios(resposta_texto, idioma_contexto)
+                        resposta_final = traduzir_resposta_vios(
+                            resposta_texto, idioma_contexto)
                         msg.body(resposta_final)
                     else:
                         resposta_texto = f"📊 *Vio:* Não encontrei nenhuma despesa registada {periodo_texto}."
-                        msg.body(traduzir_resposta_vios(resposta_texto, idioma_contexto))
+                        msg.body(traduzir_resposta_vios(
+                            resposta_texto, idioma_contexto))
 
                     return str(twiml_resp)
 
@@ -749,7 +762,8 @@ def twilio_webhook():
                     conn.close()
             else:
                 twiml_resp = MessagingResponse()
-                twiml_resp.message("⚠️ *Vio:* O banco de dados está temporariamente inacessível.")
+                twiml_resp.message(
+                    "⚠️ *Vio:* O banco de dados está temporariamente inacessível.")
                 return str(twiml_resp)
 
         # 2. LÓGICA DE LANÇAMENTO COMUM
@@ -757,7 +771,8 @@ def twilio_webhook():
         if texto_recebido:
             if lista_itens_extraidos is None:
                 try:
-                    tipo, v, l, c, idioma_contexto = inteligencia_universal_gemini(texto_recebido)
+                    tipo, v, l, c, idioma_contexto = inteligencia_universal_gemini(
+                        texto_recebido)
                 except Exception as e_gemini:
                     print(f"⚠️ Falha na IA: {e_gemini}")
                     valores = re.findall(r"\d+(?:[.,]\d+)?", texto_recebido)
@@ -798,7 +813,8 @@ def twilio_webhook():
         else:
             resposta_texto = "⚠️ *Vio:* Recebi a tua mensagem, mas não consegui extrair nenhum conteúdo legível."
 
-        resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
+        resposta_final_traduzida = traduzir_resposta_vios(
+            resposta_texto, idioma_contexto)
         twiml_resp = MessagingResponse()
         twiml_resp.message(resposta_final_traduzida)
         return str(twiml_resp)
@@ -808,11 +824,14 @@ def twilio_webhook():
         import traceback
         traceback.print_exc()
         twiml_resp = MessagingResponse()
-        twiml_resp.message(f"⚠️ *Vio:* Ocorreu um erro ao processar a tua foto/mensagem: {e_geral}")
+        twiml_resp.message(
+            f"⚠️ *Vio:* Ocorreu um erro ao processar a tua foto/mensagem: {e_geral}")
         return str(twiml_resp)
+
 
 @app.route("/ativar-admin")
 def ativar_admin():
+
     try:
         import psycopg2
         conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
