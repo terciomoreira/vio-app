@@ -10,7 +10,6 @@ import re
 import csv
 import json
 import os
--- Active: 1781974227496@@dpg-d8g3gkj7uimc73ft455g-a.oregon-postgres.render.com@5432
 
 # NOVA IMPORTAÇÃO OFICIAL DO GEMINI
 
