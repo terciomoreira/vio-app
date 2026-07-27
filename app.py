@@ -861,13 +861,14 @@ def ativar_admin():
             UPDATE usuarios 
             SET plano_ativo = TRUE,
                 data_validade = NOW() + INTERVAL '365 days'
-            WHERE id_whatsapp LIKE '%351931477038%';
+            WHERE id_whatsapp LIKE '%351931477038%' 
+               OR id_whatsapp LIKE '%351912957670%';
         """)
 
         conn.commit()
         cursor.close()
         conn.close()
-        return "<h1>✅ Conta ativada com sucesso por 1 ano!</h1><p>Já podes enviar fotos no WhatsApp.</p>"
+        return "<h1>✅ Contas VIP ativadas com sucesso por 1 ano!</h1><p>Já podem usar o WhatsApp normalmente.</p>"
     except Exception as e:
         return f"<h1>Erro ao ativar:</h1><p>{str(e)}</p>"
 
