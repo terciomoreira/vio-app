@@ -1054,6 +1054,30 @@ def metricas_ka():
     except Exception as e:
         return f"Erro ao carregar métricas: {str(e)}", 500
 
+    # -------------------------------------------------------------
+# ROTA TEMPORÁRIA DE MIGRAÇÃO DO BANCO DE DADOS
+# -------------------------------------------------------------
+@app.route("/criar-colunas-db")
+def criar_colunas_db():
+    try:
+        conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
+        cursor = conn.cursor()
+
+        # Adiciona as colunas necessárias na tabela usuarios
+        cursor.execute("""
+            ALTER TABLE usuarios 
+            ADD COLUMN IF NOT EXISTS origem VARCHAR(50) DEFAULT 'organico',
+            ADD COLUMN IF NOT EXISTS email VARCHAR(255),
+            ADD COLUMN IF NOT EXISTS nome VARCHAR(255);
+        """)
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return "<h1>✅ Colunas 'origem', 'email' e 'nome' criadas com sucesso no PostgreSQL!</h1>", 200
+    except Exception as e:
+        return f"<h1>Erro ao criar colunas:</h1><p>{str(e)}</p>", 500
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
