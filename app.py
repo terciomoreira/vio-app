@@ -3,7 +3,7 @@ from google import genai
 import psycopg2  # Conector do PostgreSQL
 from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
-from flask import Flask, request, send_file, render_template_string
+from flask import Flask, request, send_file, render_template_string, redirect, jsonify
 import requests
 from datetime import datetime
 import re
@@ -862,7 +862,8 @@ def ativar_admin():
             SET plano_ativo = TRUE,
                 data_validade = NOW() + INTERVAL '365 days'
             WHERE id_whatsapp LIKE '%351931477038%' 
-               OR id_whatsapp LIKE '%351912957670%';
+               OR id_whatsapp LIKE '%351912957670%'
+               OR id_whatsapp LIKE '%351913950511%';
         """)
 
         conn.commit()
@@ -907,7 +908,151 @@ def sucesso():
     </body>
     </html>
     '''
+# -------------------------------------------------------------
+# PARCERIA KÁ EM PORTUGAL
+# -------------------------------------------------------------
 
+@app.route("/ka", methods=["GET", "POST"])
+@app.route("/kaemportugal", methods=["GET", "POST"])
+def parceria_ka():
+    if request.method == "POST":
+        # Recebe os dados do formulário da landing page
+        nome = request.form.get("nome")
+        whatsapp_cliente = request.form.get("whatsapp", "").strip().replace(" ", "").replace("+", "")
+        email_cliente = request.form.get("email")
+
+        try:
+            conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
+            cursor = conn.cursor()
+
+            # Salva ou atualiza o lead no PostgreSQL com a marcação 'kaemportugal'
+            cursor.execute("""
+                INSERT INTO usuarios (id_whatsapp, nome, email, origem, data_validade, plano_ativo)
+                VALUES (%s, %s, %s, 'kaemportugal', NOW() + INTERVAL '7 days', TRUE)
+                ON CONFLICT (id_whatsapp) DO UPDATE 
+                SET origem = 'kaemportugal', 
+                    data_validade = NOW() + INTERVAL '7 days',
+                    plano_ativo = TRUE,
+                    nome = EXCLUDED.nome,
+                    email = EXCLUDED.email;
+            """, (f"whatsapp:+{whatsapp_cliente}", nome, email_cliente))
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            # Redireciona diretamente para o link do Stripe fornecido
+            return redirect("https://buy.stripe.com/5kQ4gz2F2cA34S1dkm1Nu00")
+
+        except Exception as e:
+            return f"Erro ao processar cadastro: {str(e)}", 500
+
+    # Se for GET (Exibição da Landing Page)
+    html_page = """
+    <!DOCTYPE html>
+    <html lang="pt">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Vio Finance x Ká em Portugal</title>
+        <style>
+            body { font-family: Arial, sans-serif; background-color: #0d1117; color: #fff; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+            .card { background: #161b22; padding: 2rem; border-radius: 12px; max-width: 400px; width: 90%; border: 1px solid #30363d; text-align: center; }
+            h2 { color: #58a6ff; margin-bottom: 0.5rem; }
+            p { color: #8b949e; font-size: 0.95rem; line-height: 1.4; }
+            input { width: 100%; padding: 12px; margin: 8px 0; border-radius: 6px; border: 1px solid #30363d; background: #0d1117; color: #fff; box-sizing: border-box; }
+            button { width: 100%; padding: 12px; background: #238636; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 10px; font-size: 1rem; }
+            button:hover { background: #2ea043; }
+            .site-link { display: block; margin-top: 20px; color: #58a6ff; text-decoration: none; font-size: 0.85rem; }
+            .site-link:hover { text-decoration: underline; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h2>🎁 Oferta Especial: Ká em Portugal</h2>
+            <p>Garanta o seu acesso ao <strong>Vio Finance</strong> com condições exclusivas.</p>
+            <form method="POST">
+                <input type="text" name="nome" placeholder="Seu Nome" required>
+                <input type="tel" name="whatsapp" placeholder="Seu WhatsApp (ex: 351912345678)" required>
+                <input type="email" name="email" placeholder="Seu Melhor E-mail" required>
+                <button type="submit">Quero Garantir a Oferta 🚀</button>
+            </form>
+            <a href="https://vio.creariscoretech.com/" target="_blank" class="site-link">Saiba mais sobre o Vio Finance</a>
+        </div>
+    </body>
+    </html>
+    """
+    return render_template_string(html_page)
+
+
+@app.route("/metricas-ka")
+def metricas_ka():
+    try:
+        conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT COUNT(*) FROM usuarios WHERE origem = 'kaemportugal';")
+        total_leads = cursor.fetchone()[0]
+
+        cursor.execute("""
+            SELECT nome, id_whatsapp, email, data_validade 
+            FROM usuarios 
+            WHERE origem = 'kaemportugal' 
+            ORDER BY data_validade DESC LIMIT 50;
+        """)
+        registros = cursor.fetchall()
+
+        cursor.close()
+        conn.close()
+
+        linhas_tabela = "".join([
+            f"<tr><td>{row[0] or 'Sem Nome'}</td><td>{row[1]}</td><td>{row[2] or '-'}</td></tr>"
+            for row in registros
+        ])
+
+        html_dashboard = f"""
+        <!DOCTYPE html>
+        <html lang="pt">
+        <head>
+            <meta charset="UTF-8">
+            <title>Métricas - Parceria Ká em Portugal</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; background: #0d1117; color: #fff; padding: 20px; }}
+                .box {{ background: #161b22; padding: 20px; border-radius: 8px; border: 1px solid #30363d; max-width: 800px; margin: 0 auto; }}
+                h1 {{ color: #58a6ff; }}
+                .metric {{ font-size: 2.5rem; font-weight: bold; color: #238636; margin: 10px 0; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+                th, td {{ border: 1px solid #30363d; padding: 10px; text-align: left; }}
+                th {{ background: #21262d; color: #58a6ff; }}
+            </style>
+        </head>
+        <body>
+            <div class="box">
+                <h1>📊 Relatório de Leads: Ká em Portugal</h1>
+                <p>Total de pessoas cadastradas até o momento:</p>
+                <div class="metric">{total_leads} Leads</div>
+                
+                <h3>Últimos Cadastros</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Nome</th>
+                            <th>WhatsApp</th>
+                            <th>E-mail</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {linhas_tabela if linhas_tabela else '<tr><td colspan="3">Nenhum cadastro registrado ainda.</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </body>
+        </html>
+        """
+        return render_template_string(html_dashboard)
+
+    except Exception as e:
+        return f"Erro ao carregar métricas: {str(e)}", 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
