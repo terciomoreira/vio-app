@@ -722,7 +722,7 @@ def twilio_webhook():
                     l = str(v_local) if v_local else "Não especificado"
                     c = str(v_cat) if v_cat else "🛒 Outros Gastos"
                     tipo = "Saída"
-                    texto_recebido = f"Gastei {v}€ no {l}"
+                    texto_recebido = f"Gastei {v}{simbolo} no {l}"
                 else:
                     texto_recebido = resultado_midia.get("texto_puro", "")
         else:
