@@ -697,25 +697,24 @@ def twilio_webhook():
         idioma_contexto = "pt"
         lista_itens_extraidos = None
 
-        # Se receber Imagem ou Áudio
+       # Se receber Imagem, PDF ou Áudio
         if url_midia:
             resultado_midia = processar_midia_url(url_midia, mime_type)
             if isinstance(resultado_midia, dict):
-                # Se for imagem processada pelo novo leitor estruturado JSON
+                # Se for imagem ou PDF processado pelo novo leitor estruturado JSON
                 if "total" in resultado_midia:
                     v_total = resultado_midia.get("total")
                     v_local = resultado_midia.get("local", "Desconhecido")
                     v_cat = resultado_midia.get("categoria", "🛒 Outros Gastos")
-                    idioma_contexto = resultado_midia.get(
-                        "idioma_usuario", "pt")
+                    idioma_contexto = resultado_midia.get("idioma_usuario", "pt")
                     lista_itens_extraidos = resultado_midia.get("itens", [])
 
-                    # Atribuição correta das variáveis
+                    # Atribuição das variáveis necessárias para a Lógica Comum abaixo
                     v = str(v_total)
-                    l = v_local
-                    c = v_cat
+                    l = str(v_local) if v_local else "Não especificado"
+                    c = str(v_cat) if v_cat else "🛒 Outros Gastos"
                     tipo = "Saída"
-                    texto_recebido = f"Gastei {v} no {l}"
+                    texto_recebido = f"Gastei {v}€ no {l}"
                 else:
                     texto_recebido = resultado_midia.get("texto_puro", "")
             else:
