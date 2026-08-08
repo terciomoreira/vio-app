@@ -345,7 +345,7 @@ def processar_midia_url(url_midia, mime_type):
                 "{\n"
                 '  "local": "Nome limpo do estabelecimento ou empresa",\n'
                 '  "total": "Valor total numérico (ex: 5.45)",\n'
-                   "moeda": "EUR",\n'
+                '  "moeda": "EUR",\n'
                 '  "categoria": "Emoji + Nome da Categoria Coerente",\n'
                 '  "tipo": "Saída",\n'
                 '  "idioma_usuario": "pt",\n'
