@@ -840,15 +840,15 @@ def twilio_webhook():
                     except Exception as e_file:
                         print(f"❌ Erro crítico no Fallback CSV: {e_file}")
 
-                # Geração do feedback final
+               # Geração do feedback final
                 if tipo == "Entrada":
-                    resposta_texto = f"💰 *Vio:* Entendi: *\"{texto_recebido}\"* -> Entrada de {v}€ em *({c})*."
+                    resposta_texto = f"💰 *Vio:* Entendi: *\"{texto_recebido}\"* -> Entrada de {v}{simbolo} em *({c})*."
                 else:
-                    resposta_texto = f"✅ *Vio:* Entendi: *\"{texto_recebido}\"* -> Despesa de {v}€ no {l} em *({c})*."
+                    resposta_texto = f"✅ *Vio:* Entendi: *\"{texto_recebido}\"* -> Despesa de {v}{simbolo} no {l} em *({c})*."
                     if lista_itens_extraidos:
                         resposta_texto += f"\n\n📦 *Produtos Detetados ({len(lista_itens_extraidos)}):*"
                         for it in lista_itens_extraidos[:6]:
-                            resposta_texto += f"\n• {it.get('traduzido')} ({it.get('qtd')}x) -> {it.get('total')} €"
+                            resposta_texto += f"\n• {it.get('traduzido')} ({it.get('qtd')}x) -> {it.get('total')} {simbolo}"
                         if len(lista_itens_extraidos) > 6:
                             resposta_texto += f"\n_...e mais {len(lista_itens_extraidos) - 6} itens guardados no banco._"
             else:
