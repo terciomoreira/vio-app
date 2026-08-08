@@ -299,9 +299,20 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
 def processar_midia_url(url_midia, mime_type):
     if not ai_client:
         return {}
+    
+    # 1. Identificação do Tipo de Mídia e Extensão
     eh_audio = "audio" in mime_type
-    ext = "ogg" if eh_audio else "jpg"
+    eh_pdf = "pdf" in mime_type
+    
+    if eh_pdf:
+        ext = "pdf"
+    elif eh_audio:
+        ext = "ogg"
+    else:
+        ext = "jpg"
+
     arquivo_temp = f"/tmp/temp_twilio_media.{ext}"
+    
     try:
         resposta = requests.get(url_midia, auth=(
             TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
@@ -310,6 +321,7 @@ def processar_midia_url(url_midia, mime_type):
 
         midia_gemini = ai_client.files.upload(file=arquivo_temp)
 
+        # 2. CASO SEJA ÁUDIO
         if eh_audio:
             prompt = "Transcreva este áudio com atenção aos valores e locais mencionados. Preserve a linguagem natural."
             resposta_gemini = ai_client.models.generate_content(
@@ -317,25 +329,31 @@ def processar_midia_url(url_midia, mime_type):
                 contents=[midia_gemini, prompt]
             )
             return {"texto_puro": resposta_gemini.text.strip()}
+        
+        # 3. CASO SEJA PDF OU IMAGEM
         else:
+            # Prompt enriquecido para aceitar tanto Imagens quanto PDFs/Faturas
             prompt = (
-                "Você é um leitor óptico (OCR) financeiro universal de última geração.\n"
-                "Analise este talão de compra / recibo / fatura simplificada de qualquer lugar do mundo (Catalunha, Espanha, Rússia, Japão, etc).\n"
-                "1. Extraia o valor TOTAL da compra e o nome limpo do estabelecimento.\n"
-                "2. Extraia TODOS os produtos comprados da lista.\n"
-                "3. IMPORTANTE: Identifique o idioma do talão e TRADUZA o nome de cada item automaticamente para o idioma do usuário. Se o talão estiver em Catalão/Espanhol (ex: Figueres), traduza os itens de forma precisa (ex: 'Bossa plastic' -> 'Saco Plástico', 'Cigró M.Cuit' -> 'Grão-de-bico Cozido'). Se o talão for de outro país, traduza para o idioma correspondente ou português por padrão.\n"
-                "4. Identifique o idioma de resposta adequado baseado no contexto do usuário.\n\n"
+                "Você é um leitor óptico (OCR) e analisador financeiro universal de última geração.\n"
+                "Analise este documento/fatura/talão/recibo de qualquer lugar do mundo (Catalunha, Espanha, Rússia, Japão, etc).\n"
+                "1. Extraia o valor TOTAL da compra/fatura e o nome limpo do estabelecimento/empresa.\n"
+                "2. Extraia TODOS os produtos ou serviços listados.\n"
+                "3. IMPORTANTE: Identifique o idioma do documento e TRADUZA o nome de cada item/serviço automaticamente para o idioma do usuário (ex: Catalão 'Bossa plastic' -> 'Saco Plástico').\n"
+                "4. Identifique se é um gasto/saída ou receita/entrada (padrão é Saída, a menos que seja um comprovante de transferência/depósito recebido).\n"
+                "5. Identifique o idioma de resposta adequado baseado no contexto do usuário.\n\n"
                 "Retorne estritamente um objeto JSON estruturado como o modelo abaixo:\n"
                 "{\n"
-                '  "local": "Nome limpo do estabelecimento",\n'
+                '  "local": "Nome limpo do estabelecimento ou empresa",\n'
                 '  "total": "Valor total numérico (ex: 5.45)",\n'
                 '  "categoria": "Emoji + Nome da Categoria Coerente",\n'
+                '  "tipo": "Saída",\n'
                 '  "idioma_usuario": "pt",\n'
                 '  "itens": [\n'
                 '     {"original": "NOME ORIGINAL", "traduzido": "NOME TRADUZIDO", "qtd": 1, "preco_un": 1.20, "total": 1.20}\n'
                 '  ]\n'
                 "}"
             )
+            
             resposta_gemini = ai_client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=[midia_gemini, prompt],
@@ -346,7 +364,7 @@ def processar_midia_url(url_midia, mime_type):
             texto_json = resposta_gemini.text.strip().replace(
                 "```json", "").replace("```", "").strip()
             print(
-                f"📸 Resposta JSON Estruturada do Gemini para Imagem: {texto_json}")
+                f"📸/📄 Resposta JSON Estruturada do Gemini para Mídia ({ext}): {texto_json}")
             return json.loads(texto_json)
 
     except Exception as e:
@@ -374,8 +392,7 @@ def traduzir_resposta_vios(mensagem_base, idioma_destino):
         return res.text.strip()
     except Exception:
         return mensagem_base
-
-
+    
 # ==========================================
 #  ROTA: GERADOR E DOWNLOAD DE EXCEL/CSV
 # ==========================================
