@@ -345,6 +345,7 @@ def processar_midia_url(url_midia, mime_type):
                 "{\n"
                 '  "local": "Nome limpo do estabelecimento ou empresa",\n'
                 '  "total": "Valor total numérico (ex: 5.45)",\n'
+                   "moeda": "EUR",\n'
                 '  "categoria": "Emoji + Nome da Categoria Coerente",\n'
                 '  "tipo": "Saída",\n'
                 '  "idioma_usuario": "pt",\n'
@@ -700,7 +701,14 @@ def twilio_webhook():
        # Se receber Imagem, PDF ou Áudio
         if url_midia:
             resultado_midia = processar_midia_url(url_midia, mime_type)
-            if isinstance(resultado_midia, dict):
+                    # 1. Mapeamento de moedas
+        SIMBOLOS_MOEDA = {"USD": "$", "EUR": "€", "BRL": "R$", "GBP": "£"}
+
+        # 2. Pega a moeda capturada pelo Gemini (se não veio nenhuma, assume 'EUR')
+        # Troque 'resultado' pelo nome da variável que recebe o retorno de processar_midia_url no seu arquivo!
+        moeda_doc = resultado_midia.get("moeda", "EUR").upper()
+        simbolo = SIMBOLOS_MOEDA.get(moeda_doc, "€")
+        if isinstance(resultado_midia, dict):
                 # Se for imagem ou PDF processado pelo novo leitor estruturado JSON
                 if "total" in resultado_midia:
                     v_total = resultado_midia.get("total")
