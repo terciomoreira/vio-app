@@ -725,8 +725,8 @@ def twilio_webhook():
                     texto_recebido = f"Gastei {v}€ no {l}"
                 else:
                     texto_recebido = resultado_midia.get("texto_puro", "")
-            else:
-                texto_recebido = str(resultado_midia)
+        else:
+            texto_recebido = str(resultado_midia)
 
         # 1. LÓGICA DE COMANDO DE RESUMO
         if texto_recebido and verificar_se_e_comando_resumo(texto_recebido):
