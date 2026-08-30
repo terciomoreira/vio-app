@@ -690,7 +690,7 @@ def twilio_webhook():
                     twiml_resp.message(
                         "⚠️ *Vio:* Não encontrei nenhuma transação recente para apagar.")
 
-                return Response(str(twiml_resp), mimetype='application/xml')
+                return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
         if not verificar_assinatura_ativa(id_usuario):
             twiml_resp = MessagingResponse()
@@ -699,7 +699,7 @@ def twilio_webhook():
                 "Para continuares a gerir as tuas finanças com inteligência artificial por apenas *5,90€/mês* + IVA, "
                 "renova a tua conta aqui: https://vio.creariscoretech.com"
             )
-            return Response(str(twiml_resp), mimetype='application/xml')
+            return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
         # Processamento de Mídia (Imagem, PDF ou Áudio)
         if url_midia:
@@ -787,19 +787,19 @@ def twilio_webhook():
                         resposta_texto = f"📊 *Vio:* Não encontrei nenhuma despesa registada {periodo_texto}."
                         msg.body(traduzir_resposta_vios(resposta_texto, idioma_contexto))
 
-                    return Response(str(twiml_resp), mimetype='application/xml')
+                    return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
                 except Exception as e_banco:
                     resposta_final = f"⚠️ *Vio:* Erro ao processar o teu resumo no banco: {e_banco}"
                     twiml_resp = MessagingResponse()
                     twiml_resp.message(resposta_final)
-                    return Response(str(twiml_resp), mimetype='application/xml')
+                    return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
                 finally:
                     conn.close()
             else:
                 twiml_resp = MessagingResponse()
                 twiml_resp.message("⚠️ *Vio:* O banco de dados está temporariamente inacessível.")
-                return Response(str(twiml_resp), mimetype='application/xml')
+                return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
         # 2. LÓGICA DE LANÇAMENTO COMUM
         resposta_texto = ""
@@ -854,15 +854,17 @@ def twilio_webhook():
         twiml_resp.message(resposta_final_traduzida)
         
         # RETORNO CORRETO COM HEADER XML EXPLICITO PARA O TWILIO
-        return Response(str(twiml_resp), mimetype='application/xml')
+        return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
     except Exception as e_geral:
         print(f"❌ ERRO GRAVE NA ROTA WHATSAPP: {e_geral}")
         import traceback
         traceback.print_exc()
         twiml_resp = MessagingResponse()
-        twiml_resp.message(f"⚠️ *Vio:* Ocorreu um erro ao processar a tua foto/mensagem: {e_geral}")
-        return Response(str(twiml_resp), mimetype='application/xml')    
+        resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
+        twiml_resp.message(resposta_final_traduzida)
+        # RETORNO DEFINITIVO E À PROVA DE FALHAS:
+        return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}    
 
 @app.route("/ativar-admin")
 def ativar_admin():
