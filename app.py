@@ -804,9 +804,29 @@ def twilio_webhook():
                 twiml_resp.message("⚠️ *Vio:* O banco de dados está temporariamente inacessível.")
                 return str(twiml_resp)
 
-        # 2. LÓGICA DE LANÇAMENTO COMUM
+       # 2. LÓGICA DE LANÇAMENTO COMUM
         resposta_texto = ""
-        if texto_recebido:
+        
+        # Se for imagem/PDF já processada e com valor válido (v já definido)
+        if url_midia and isinstance(resultado_midia, dict) and "total" in resultado_midia:
+            v_total = resultado_midia.get("total", "0.00")
+            v_local = resultado_midia.get("local", "Não especificado")
+            v_cat = resultado_midia.get("categoria", "🛒 Outros Gastos")
+            
+            # Garante gravação no banco caso ainda não tenha feito
+            salvar_transacao_banco(
+                id_whatsapp=id_usuario, tipo="Saída", valor=v_total, local=v_local, category=v_cat, texto_puro=f"Gastei {v_total}{simbolo} no {v_local}", lista_itens=lista_itens_extraidos
+            )
+
+            resposta_texto = f"✅ *Vio:* Entendi! Despesa de *{v_total}{simbolo}* no *{v_local}* em *({v_cat})*."
+            if lista_itens_extraidos:
+                resposta_texto += f"\n\n📦 *Produtos Detetados ({len(lista_itens_extraidos)}):*"
+                for it in lista_itens_extraidos[:6]:
+                    resposta_texto += f"\n• {it.get('traduzido')} ({it.get('qtd')}x) -> {it.get('total')} {simbolo}"
+                if len(lista_itens_extraidos) > 6:
+                    resposta_texto += f"\n_...e mais {len(lista_itens_extraidos) - 6} itens guardados no banco._"
+
+        elif texto_recebido:
             if lista_itens_extraidos is None:
                 try:
                     tipo, v, l, c, idioma_contexto = inteligencia_universal_gemini(texto_recebido)
@@ -816,45 +836,29 @@ def twilio_webhook():
                     v = valores[0].replace(",", ".") if valores else ""
                     tipo, l, c = "Saída", "Não especificado", "🛒 Outros Gastos"
 
-            if v:
+            if 'v' in locals() and v:
                 if not l or str(l).lower() == "desconhecido":
                     l = "Não especificado"
 
-                # Salva na base de dados
-                gravou_no_banco = salvar_transacao_banco(
+                salvar_transacao_banco(
                     id_whatsapp=id_usuario, tipo=tipo, valor=v, local=l, category=c, texto_puro=texto_recebido, lista_itens=lista_itens_extraidos
                 )
 
-                if not gravou_no_banco:
-                    try:
-                        csv_usuario = obter_arquivo_usuario(id_usuario)
-                        data_atual = datetime.now().strftime("%Y-%m-%d %H:%M")
-                        with open(csv_usuario, "a", encoding="utf-8") as f:
-                            f.write(f"{data_atual},{tipo},{v},{l},{c}\n")
-                    except Exception as e_file:
-                        print(f"❌ Erro crítico no Fallback CSV: {e_file}")
-
-                # Geração do feedback final
                 if tipo == "Entrada":
                     resposta_texto = f"💰 *Vio:* Entendi: *\"{texto_recebido}\"* -> Entrada de {v}{simbolo} em *({c})*."
                 else:
                     resposta_texto = f"✅ *Vio:* Entendi: *\"{texto_recebido}\"* -> Despesa de {v}{simbolo} no {l} em *({c})*."
-                    if lista_itens_extraidos:
-                        resposta_texto += f"\n\n📦 *Produtos Detetados ({len(lista_itens_extraidos)}):*"
-                        for it in lista_itens_extraidos[:6]:
-                            resposta_texto += f"\n• {it.get('traduzido')} ({it.get('qtd')}x) -> {it.get('total')} {simbolo}"
-                        if len(lista_itens_extraidos) > 6:
-                            resposta_texto += f"\n_...e mais {len(lista_itens_extraidos) - 6} itens guardados no banco._"
             else:
                 resposta_texto = f"⚠️ *Vio:* Entendi \"{texto_recebido}\", mas não consegui extrair os valores com precisão."
         else:
             resposta_texto = "⚠️ *Vio:* Recebi a tua mensagem, mas não consegui extrair nenhum conteúdo legível."
 
-        resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
+        # Retorno TWiML direto
         twiml_resp = MessagingResponse()
+        resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
         twiml_resp.message(resposta_final_traduzida)
         return str(twiml_resp)
-
+    
     except Exception as e_geral:
         print(f"❌ ERRO GRAVE NA ROTA WHATSAPP: {e_geral}")
         import traceback
