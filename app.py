@@ -654,7 +654,6 @@ def stripe_webhook():
 # ==========================================
 #  WEBHOOK DO TWILIO (MECANISMO CENTRAL VIO)
 # ==========================================
-
 @app.route("/whatsapp", methods=["POST"])
 def twilio_webhook():
     try:
@@ -720,14 +719,35 @@ def twilio_webhook():
                     l = str(v_local) if v_local else "Não especificado"
                     c = str(v_cat) if v_cat else "🛒 Outros Gastos"
                     tipo = "Saída"
-                    texto_recebido = f"Gastei {v}{simbolo} no {l}"
                 else:
                     texto_recebido = resultado_midia.get("texto_puro", "")
             else:
                 texto_recebido = str(resultado_midia)
 
-        # 1. LÓGICA DE COMANDO DE RESUMO
-        if texto_recebido and verificar_se_e_comando_resumo(texto_recebido):
+        # 1. PRIORIDADE: SE FOR MÍDIA COM DADOS EXTRAÍDOS (RECIBO/FOTO)
+        if url_midia and isinstance(resultado_midia, dict) and "total" in resultado_midia:
+            salvar_transacao_banco(
+                id_whatsapp=id_usuario, tipo="Saída", valor=v, local=l, category=c, texto_puro=f"Gastei {v}{simbolo} no {l}", lista_itens=lista_itens_extraidos
+            )
+
+            resposta_texto = f"✅ *Vio:* Entendi! Despesa de *{v}{simbolo}* no *{l}* em *({c})*."
+            if lista_itens_extraidos:
+                resposta_texto += f"\n\n📦 *Produtos Detetados ({len(lista_itens_extraidos)}):*"
+                for it in lista_itens_extraidos[:6]:
+                    nome_p = it.get('traduzido') or it.get('original') or 'Produto'
+                    qtd_p = it.get('qtd', 1)
+                    tot_p = it.get('total', '0.00')
+                    resposta_texto += f"\n• {nome_p} ({qtd_p}x) -> {tot_p} {simbolo}"
+                if len(lista_itens_extraidos) > 6:
+                    resposta_texto += f"\n_...e mais {len(lista_itens_extraidos) - 6} itens guardados no banco._"
+
+            twiml_resp = MessagingResponse()
+            resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
+            twiml_resp.message(resposta_final_traduzida)
+            return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
+
+        # 2. SEGUNDA PRIORIDADE: COMANDO DE RESUMO
+        elif texto_recebido and verificar_se_e_comando_resumo(texto_recebido):
             mensagem_min = texto_recebido.lower()
 
             query_filtro = "data_transacao >= DATE_TRUNC('month', NOW())"
@@ -801,27 +821,7 @@ def twilio_webhook():
                 twiml_resp.message("⚠️ *Vio:* O banco de dados está temporariamente inacessível.")
                 return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
-        # 2. LÓGICA DE LANÇAMENTO COMUM
-        resposta_texto = ""
-        
-        # Se for imagem/PDF com total extraído
-        if url_midia and isinstance(resultado_midia, dict) and "total" in resultado_midia:
-            v_total = resultado_midia.get("total", "0.00")
-            v_local = resultado_midia.get("local", "Não especificado")
-            v_cat = resultado_midia.get("categoria", "🛒 Outros Gastos")
-            
-            salvar_transacao_banco(
-                id_whatsapp=id_usuario, tipo="Saída", valor=v_total, local=v_local, category=v_cat, texto_puro=f"Gastei {v_total}{simbolo} no {v_local}", lista_itens=lista_itens_extraidos
-            )
-
-            resposta_texto = f"✅ *Vio:* Entendi! Despesa de *{v_total}{simbolo}* no *{v_local}* em *({v_cat})*."
-            if lista_itens_extraidos:
-                resposta_texto += f"\n\n📦 *Produtos Detetados ({len(lista_itens_extraidos)}):*"
-                for it in lista_itens_extraidos[:6]:
-                    resposta_texto += f"\n• {it.get('traduzido')} ({it.get('qtd')}x) -> {it.get('total')} {simbolo}"
-                if len(lista_itens_extraidos) > 6:
-                    resposta_texto += f"\n_...e mais {len(lista_itens_extraidos) - 6} itens guardados no banco._"
-
+        # 3. TERCEIRA PRIORIDADE: TEXTO COMUM OU MÍDIA SEM TOTAL
         elif texto_recebido:
             if lista_itens_extraidos is None:
                 try:
@@ -852,8 +852,6 @@ def twilio_webhook():
         twiml_resp = MessagingResponse()
         resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
         twiml_resp.message(resposta_final_traduzida)
-        
-        # RETORNO CORRETO COM HEADER XML EXPLICITO PARA O TWILIO
         return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
     except Exception as e_geral:
@@ -861,10 +859,8 @@ def twilio_webhook():
         import traceback
         traceback.print_exc()
         twiml_resp = MessagingResponse()
-        resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
-        twiml_resp.message(resposta_final_traduzida)
-        # RETORNO DEFINITIVO E À PROVA DE FALHAS:
-        return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}    
+        twiml_resp.message(f"⚠️ *Vio:* Ocorreu um erro ao processar a tua solicitação: {e_geral}")
+        return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
 @app.route("/ativar-admin")
 def ativar_admin():
