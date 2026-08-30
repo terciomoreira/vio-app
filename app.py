@@ -663,11 +663,17 @@ def twilio_webhook():
         url_midia = request.form.get("MediaUrl0", "")
         mime_type = request.form.get("MediaContentType0", "")
 
+        # --- INICIALIZAÇÃO DE VARIÁVEIS DE ESCOPO ---
+        resultado_midia = None
+        lista_itens_extraidos = None
+        idioma_contexto = "pt"
+        simbolo = "€"
+        SIMBOLOS_MOEDA = {"USD": "$", "EUR": "€", "BRL": "R$", "GBP": "£"}
+
         if texto_recebido:
             texto_recebido = str(texto_recebido).strip()
 
-        id_usuario = remetente.replace(
-            "whatsapp:", "").replace("+", "").strip()
+        id_usuario = remetente.replace("whatsapp:", "").replace("+", "").strip()
         verificar_e_registrar_usuario(id_usuario)
 
         # Intersecção do comando desfazer
@@ -695,21 +701,16 @@ def twilio_webhook():
             )
             return str(twiml_resp)
 
-        idioma_contexto = "pt"
-        lista_itens_extraidos = None
-
-       # Se receber Imagem, PDF ou Áudio
+        # Processamento de Mídia (Imagem, PDF ou Áudio)
         if url_midia:
             resultado_midia = processar_midia_url(url_midia, mime_type)
-                    # 1. Mapeamento de moedas
-        SIMBOLOS_MOEDA = {"USD": "$", "EUR": "€", "BRL": "R$", "GBP": "£"}
+            
+            if isinstance(resultado_midia, dict):
+                # Extrai a moeda do documento de forma segura
+                moeda_doc = resultado_midia.get("moeda", "EUR").upper()
+                simbolo = SIMBOLOS_MOEDA.get(moeda_doc, "€")
 
-        # 2. Pega a moeda capturada pelo Gemini (se não veio nenhuma, assume 'EUR')
-        # Troque 'resultado' pelo nome da variável que recebe o retorno de processar_midia_url no seu arquivo!
-        moeda_doc = resultado_midia.get("moeda", "EUR").upper()
-        simbolo = SIMBOLOS_MOEDA.get(moeda_doc, "€")
-        if isinstance(resultado_midia, dict):
-                # Se for imagem ou PDF processado pelo novo leitor estruturado JSON
+                # Se for imagem ou PDF processado pelo leitor estruturado JSON
                 if "total" in resultado_midia:
                     v_total = resultado_midia.get("total")
                     v_local = resultado_midia.get("local", "Desconhecido")
@@ -717,7 +718,7 @@ def twilio_webhook():
                     idioma_contexto = resultado_midia.get("idioma_usuario", "pt")
                     lista_itens_extraidos = resultado_midia.get("itens", [])
 
-                    # Atribuição das variáveis necessárias para a Lógica Comum abaixo
+                    # Atribuição das variáveis para a Lógica Comum
                     v = str(v_total)
                     l = str(v_local) if v_local else "Não especificado"
                     c = str(v_cat) if v_cat else "🛒 Outros Gastos"
@@ -725,8 +726,8 @@ def twilio_webhook():
                     texto_recebido = f"Gastei {v}{simbolo} no {l}"
                 else:
                     texto_recebido = resultado_midia.get("texto_puro", "")
-        else:
-            texto_recebido = str(resultado_midia)
+            else:
+                texto_recebido = str(resultado_midia)
 
         # 1. LÓGICA DE COMANDO DE RESUMO
         if texto_recebido and verificar_se_e_comando_resumo(texto_recebido):
@@ -751,13 +752,10 @@ def twilio_webhook():
             conn = obter_conexao_banco()
             if conn:
                 try:
-                    id_com_mais = "+" + \
-                        id_usuario if not id_usuario.startswith(
-                            "+") else id_usuario
+                    id_com_mais = "+" + id_usuario if not id_usuario.startswith("+") else id_usuario
                     id_sem_mais = id_usuario.replace("+", "")
 
                     with conn.cursor() as cursor:
-                        # 🛠️ Linha adicionada para corrigir o erro no PostgreSQL:
                         cursor.execute(
                             "ALTER TABLE transacoes ADD COLUMN IF NOT EXISTS data_transacao TIMESTAMP DEFAULT NOW();")
 
@@ -786,13 +784,11 @@ def twilio_webhook():
                         link_download = f"{host_app}/download/{id_usuario}"
                         resposta_texto += f"\n\n📥 *Descarrega o Excel consolidado:* {link_download}"
 
-                        resposta_final = traduzir_resposta_vios(
-                            resposta_texto, idioma_contexto)
+                        resposta_final = traduzir_resposta_vios(resposta_texto, idioma_contexto)
                         msg.body(resposta_final)
                     else:
                         resposta_texto = f"📊 *Vio:* Não encontrei nenhuma despesa registada {periodo_texto}."
-                        msg.body(traduzir_resposta_vios(
-                            resposta_texto, idioma_contexto))
+                        msg.body(traduzir_resposta_vios(resposta_texto, idioma_contexto))
 
                     return str(twiml_resp)
 
@@ -805,8 +801,7 @@ def twilio_webhook():
                     conn.close()
             else:
                 twiml_resp = MessagingResponse()
-                twiml_resp.message(
-                    "⚠️ *Vio:* O banco de dados está temporariamente inacessível.")
+                twiml_resp.message("⚠️ *Vio:* O banco de dados está temporariamente inacessível.")
                 return str(twiml_resp)
 
         # 2. LÓGICA DE LANÇAMENTO COMUM
@@ -814,8 +809,7 @@ def twilio_webhook():
         if texto_recebido:
             if lista_itens_extraidos is None:
                 try:
-                    tipo, v, l, c, idioma_contexto = inteligencia_universal_gemini(
-                        texto_recebido)
+                    tipo, v, l, c, idioma_contexto = inteligencia_universal_gemini(texto_recebido)
                 except Exception as e_gemini:
                     print(f"⚠️ Falha na IA: {e_gemini}")
                     valores = re.findall(r"\d+(?:[.,]\d+)?", texto_recebido)
@@ -840,7 +834,7 @@ def twilio_webhook():
                     except Exception as e_file:
                         print(f"❌ Erro crítico no Fallback CSV: {e_file}")
 
-               # Geração do feedback final
+                # Geração do feedback final
                 if tipo == "Entrada":
                     resposta_texto = f"💰 *Vio:* Entendi: *\"{texto_recebido}\"* -> Entrada de {v}{simbolo} em *({c})*."
                 else:
@@ -856,8 +850,7 @@ def twilio_webhook():
         else:
             resposta_texto = "⚠️ *Vio:* Recebi a tua mensagem, mas não consegui extrair nenhum conteúdo legível."
 
-        resposta_final_traduzida = traduzir_resposta_vios(
-            resposta_texto, idioma_contexto)
+        resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
         twiml_resp = MessagingResponse()
         twiml_resp.message(resposta_final_traduzida)
         return str(twiml_resp)
@@ -867,10 +860,9 @@ def twilio_webhook():
         import traceback
         traceback.print_exc()
         twiml_resp = MessagingResponse()
-        twiml_resp.message(
-            f"⚠️ *Vio:* Ocorreu um erro ao processar a tua foto/mensagem: {e_geral}")
+        twiml_resp.message(f"⚠️ *Vio:* Ocorreu um erro ao processar a tua foto/mensagem: {e_geral}")
         return str(twiml_resp)
-
+    
 
 @app.route("/ativar-admin")
 def ativar_admin():
