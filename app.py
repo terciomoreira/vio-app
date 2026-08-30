@@ -690,7 +690,7 @@ def twilio_webhook():
                     twiml_resp.message(
                         "⚠️ *Vio:* Não encontrei nenhuma transação recente para apagar.")
 
-                return str(twiml_resp)
+                return Response(str(twiml_resp), mimetype='application/xml')
 
         if not verificar_assinatura_ativa(id_usuario):
             twiml_resp = MessagingResponse()
@@ -699,18 +699,16 @@ def twilio_webhook():
                 "Para continuares a gerir as tuas finanças com inteligência artificial por apenas *5,90€/mês* + IVA, "
                 "renova a tua conta aqui: https://vio.creariscoretech.com"
             )
-            return str(twiml_resp)
+            return Response(str(twiml_resp), mimetype='application/xml')
 
         # Processamento de Mídia (Imagem, PDF ou Áudio)
         if url_midia:
             resultado_midia = processar_midia_url(url_midia, mime_type)
             
             if isinstance(resultado_midia, dict):
-                # Extrai a moeda do documento de forma segura
                 moeda_doc = resultado_midia.get("moeda", "EUR").upper()
                 simbolo = SIMBOLOS_MOEDA.get(moeda_doc, "€")
 
-                # Se for imagem ou PDF processado pelo leitor estruturado JSON
                 if "total" in resultado_midia:
                     v_total = resultado_midia.get("total")
                     v_local = resultado_midia.get("local", "Desconhecido")
@@ -718,7 +716,6 @@ def twilio_webhook():
                     idioma_contexto = resultado_midia.get("idioma_usuario", "pt")
                     lista_itens_extraidos = resultado_midia.get("itens", [])
 
-                    # Atribuição das variáveis para a Lógica Comum
                     v = str(v_total)
                     l = str(v_local) if v_local else "Não especificado"
                     c = str(v_cat) if v_cat else "🛒 Outros Gastos"
@@ -790,30 +787,29 @@ def twilio_webhook():
                         resposta_texto = f"📊 *Vio:* Não encontrei nenhuma despesa registada {periodo_texto}."
                         msg.body(traduzir_resposta_vios(resposta_texto, idioma_contexto))
 
-                    return str(twiml_resp)
+                    return Response(str(twiml_resp), mimetype='application/xml')
 
                 except Exception as e_banco:
                     resposta_final = f"⚠️ *Vio:* Erro ao processar o teu resumo no banco: {e_banco}"
                     twiml_resp = MessagingResponse()
                     twiml_resp.message(resposta_final)
-                    return str(twiml_resp)
+                    return Response(str(twiml_resp), mimetype='application/xml')
                 finally:
                     conn.close()
             else:
                 twiml_resp = MessagingResponse()
                 twiml_resp.message("⚠️ *Vio:* O banco de dados está temporariamente inacessível.")
-                return str(twiml_resp)
+                return Response(str(twiml_resp), mimetype='application/xml')
 
-       # 2. LÓGICA DE LANÇAMENTO COMUM
+        # 2. LÓGICA DE LANÇAMENTO COMUM
         resposta_texto = ""
         
-        # Se for imagem/PDF já processada e com valor válido (v já definido)
+        # Se for imagem/PDF com total extraído
         if url_midia and isinstance(resultado_midia, dict) and "total" in resultado_midia:
             v_total = resultado_midia.get("total", "0.00")
             v_local = resultado_midia.get("local", "Não especificado")
             v_cat = resultado_midia.get("categoria", "🛒 Outros Gastos")
             
-            # Garante gravação no banco caso ainda não tenha feito
             salvar_transacao_banco(
                 id_whatsapp=id_usuario, tipo="Saída", valor=v_total, local=v_local, category=v_cat, texto_puro=f"Gastei {v_total}{simbolo} no {v_local}", lista_itens=lista_itens_extraidos
             )
@@ -853,20 +849,20 @@ def twilio_webhook():
         else:
             resposta_texto = "⚠️ *Vio:* Recebi a tua mensagem, mas não consegui extrair nenhum conteúdo legível."
 
-        # Retorno TWiML direto
         twiml_resp = MessagingResponse()
         resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
         twiml_resp.message(resposta_final_traduzida)
-        return str(twiml_resp)
-    
+        
+        # RETORNO CORRETO COM HEADER XML EXPLICITO PARA O TWILIO
+        return Response(str(twiml_resp), mimetype='application/xml')
+
     except Exception as e_geral:
         print(f"❌ ERRO GRAVE NA ROTA WHATSAPP: {e_geral}")
         import traceback
         traceback.print_exc()
         twiml_resp = MessagingResponse()
         twiml_resp.message(f"⚠️ *Vio:* Ocorreu um erro ao processar a tua foto/mensagem: {e_geral}")
-        return str(twiml_resp)
-    
+        return Response(str(twiml_resp), mimetype='application/xml')    
 
 @app.route("/ativar-admin")
 def ativar_admin():
