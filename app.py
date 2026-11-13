@@ -28,10 +28,11 @@ twilio_client = None
 if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
     twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
-# Inicializa o cliente oficial do Gemini
+# Inicializa o cliente oficial do Gemini forçando a versão v1beta (Exigido para modo JSON)
 ai_client = None
 if GEMINI_API_KEY:
-    ai_client = genai.Client(api_key=GEMINI_API_KEY)
+    ai_client = genai.Client(api_key=GEMINI_API_KEY, http_options={
+                             'api_version': 'v1beta'})
     print("🚀 Nova API do Gemini configurada com sucesso!")
 else:
     print("⚠️ AVISO: GEMINI_API_KEY não localizada.")
@@ -299,11 +300,11 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
 def processar_midia_url(url_midia, mime_type):
     if not ai_client:
         return {}
-    
+
     # 1. Identificação do Tipo de Mídia e Extensão
     eh_audio = "audio" in mime_type
     eh_pdf = "pdf" in mime_type
-    
+
     if eh_pdf:
         ext = "pdf"
     elif eh_audio:
@@ -312,7 +313,7 @@ def processar_midia_url(url_midia, mime_type):
         ext = "jpg"
 
     arquivo_temp = f"/tmp/temp_twilio_media.{ext}"
-    
+
     try:
         resposta = requests.get(url_midia, auth=(
             TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN))
@@ -329,7 +330,7 @@ def processar_midia_url(url_midia, mime_type):
                 contents=[midia_gemini, prompt]
             )
             return {"texto_puro": resposta_gemini.text.strip()}
-        
+
         # 3. CASO SEJA PDF OU IMAGEM
         else:
             # Prompt enriquecido para aceitar tanto Imagens quanto PDFs/Faturas
@@ -354,7 +355,7 @@ def processar_midia_url(url_midia, mime_type):
                 '  ]\n'
                 "}"
             )
-            
+
             resposta_gemini = ai_client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=[midia_gemini, prompt],
@@ -393,10 +394,12 @@ def traduzir_resposta_vios(mensagem_base, idioma_destino):
         return res.text.strip()
     except Exception:
         return mensagem_base
-    
+
 # ==========================================
 #  ROTA: GERADOR E DOWNLOAD DE EXCEL/CSV
 # ==========================================
+
+
 @app.route("/download/<id_usuario>", methods=["GET"])
 def download_relatorio(id_usuario):
     csv_path = f"/tmp/extrato_{id_usuario}.csv"
@@ -672,7 +675,8 @@ def twilio_webhook():
         if texto_recebido:
             texto_recebido = str(texto_recebido).strip()
 
-        id_usuario = remetente.replace("whatsapp:", "").replace("+", "").strip()
+        id_usuario = remetente.replace(
+            "whatsapp:", "").replace("+", "").strip()
         verificar_e_registrar_usuario(id_usuario)
 
         # Intersecção do comando desfazer
@@ -703,7 +707,7 @@ def twilio_webhook():
         # Processamento de Mídia (Imagem, PDF ou Áudio)
         if url_midia:
             resultado_midia = processar_midia_url(url_midia, mime_type)
-            
+
             if isinstance(resultado_midia, dict):
                 moeda_doc = resultado_midia.get("moeda", "EUR").upper()
                 simbolo = SIMBOLOS_MOEDA.get(moeda_doc, "€")
@@ -712,7 +716,8 @@ def twilio_webhook():
                     v_total = resultado_midia.get("total")
                     v_local = resultado_midia.get("local", "Desconhecido")
                     v_cat = resultado_midia.get("categoria", "🛒 Outros Gastos")
-                    idioma_contexto = resultado_midia.get("idioma_usuario", "pt")
+                    idioma_contexto = resultado_midia.get(
+                        "idioma_usuario", "pt")
                     lista_itens_extraidos = resultado_midia.get("itens", [])
 
                     v = str(v_total)
@@ -734,7 +739,8 @@ def twilio_webhook():
             if lista_itens_extraidos:
                 resposta_texto += f"\n\n📦 *Produtos Detetados ({len(lista_itens_extraidos)}):*"
                 for it in lista_itens_extraidos[:6]:
-                    nome_p = it.get('traduzido') or it.get('original') or 'Produto'
+                    nome_p = it.get('traduzido') or it.get(
+                        'original') or 'Produto'
                     qtd_p = it.get('qtd', 1)
                     tot_p = it.get('total', '0.00')
                     resposta_texto += f"\n• {nome_p} ({qtd_p}x) -> {tot_p} {simbolo}"
@@ -742,7 +748,8 @@ def twilio_webhook():
                     resposta_texto += f"\n_...e mais {len(lista_itens_extraidos) - 6} itens guardados no banco._"
 
             twiml_resp = MessagingResponse()
-            resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
+            resposta_final_traduzida = traduzir_resposta_vios(
+                resposta_texto, idioma_contexto)
             twiml_resp.message(resposta_final_traduzida)
             return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
@@ -769,7 +776,9 @@ def twilio_webhook():
             conn = obter_conexao_banco()
             if conn:
                 try:
-                    id_com_mais = "+" + id_usuario if not id_usuario.startswith("+") else id_usuario
+                    id_com_mais = "+" + \
+                        id_usuario if not id_usuario.startswith(
+                            "+") else id_usuario
                     id_sem_mais = id_usuario.replace("+", "")
 
                     with conn.cursor() as cursor:
@@ -801,11 +810,13 @@ def twilio_webhook():
                         link_download = f"{host_app}/download/{id_usuario}"
                         resposta_texto += f"\n\n📥 *Descarrega o Excel consolidado:* {link_download}"
 
-                        resposta_final = traduzir_resposta_vios(resposta_texto, idioma_contexto)
+                        resposta_final = traduzir_resposta_vios(
+                            resposta_texto, idioma_contexto)
                         msg.body(resposta_final)
                     else:
                         resposta_texto = f"📊 *Vio:* Não encontrei nenhuma despesa registada {periodo_texto}."
-                        msg.body(traduzir_resposta_vios(resposta_texto, idioma_contexto))
+                        msg.body(traduzir_resposta_vios(
+                            resposta_texto, idioma_contexto))
 
                     return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
@@ -818,14 +829,16 @@ def twilio_webhook():
                     conn.close()
             else:
                 twiml_resp = MessagingResponse()
-                twiml_resp.message("⚠️ *Vio:* O banco de dados está temporariamente inacessível.")
+                twiml_resp.message(
+                    "⚠️ *Vio:* O banco de dados está temporariamente inacessível.")
                 return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
         # 3. TERCEIRA PRIORIDADE: TEXTO COMUM OU MÍDIA SEM TOTAL
         elif texto_recebido:
             if lista_itens_extraidos is None:
                 try:
-                    tipo, v, l, c, idioma_contexto = inteligencia_universal_gemini(texto_recebido)
+                    tipo, v, l, c, idioma_contexto = inteligencia_universal_gemini(
+                        texto_recebido)
                 except Exception as e_gemini:
                     print(f"⚠️ Falha na IA: {e_gemini}")
                     valores = re.findall(r"\d+(?:[.,]\d+)?", texto_recebido)
@@ -850,7 +863,8 @@ def twilio_webhook():
             resposta_texto = "⚠️ *Vio:* Recebi a tua mensagem, mas não consegui extrair nenhum conteúdo legível."
 
         twiml_resp = MessagingResponse()
-        resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
+        resposta_final_traduzida = traduzir_resposta_vios(
+            resposta_texto, idioma_contexto)
         twiml_resp.message(resposta_final_traduzida)
         return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
@@ -859,8 +873,10 @@ def twilio_webhook():
         import traceback
         traceback.print_exc()
         twiml_resp = MessagingResponse()
-        twiml_resp.message(f"⚠️ *Vio:* Ocorreu um erro ao processar a tua solicitação: {e_geral}")
+        twiml_resp.message(
+            f"⚠️ *Vio:* Ocorreu um erro ao processar a tua solicitação: {e_geral}")
         return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
+
 
 @app.route("/ativar-admin")
 def ativar_admin():
@@ -926,13 +942,15 @@ def sucesso():
 # PARCERIA KÁ EM PORTUGAL
 # -------------------------------------------------------------
 
+
 @app.route("/ka", methods=["GET", "POST"])
 @app.route("/kaemportugal", methods=["GET", "POST"])
 def parceria_ka():
     if request.method == "POST":
         # Recebe os dados do formulário da landing page
         nome = request.form.get("nome")
-        whatsapp_cliente = request.form.get("whatsapp", "").strip().replace(" ", "").replace("+", "")
+        whatsapp_cliente = request.form.get(
+            "whatsapp", "").strip().replace(" ", "").replace("+", "")
         email_cliente = request.form.get("email")
 
         try:
@@ -1005,7 +1023,8 @@ def metricas_ka():
         conn = psycopg2.connect(os.environ.get('DATABASE_URL'))
         cursor = conn.cursor()
 
-        cursor.execute("SELECT COUNT(*) FROM usuarios WHERE origem = 'kaemportugal';")
+        cursor.execute(
+            "SELECT COUNT(*) FROM usuarios WHERE origem = 'kaemportugal';")
         total_leads = cursor.fetchone()[0]
 
         cursor.execute("""
@@ -1071,6 +1090,8 @@ def metricas_ka():
     # -------------------------------------------------------------
 # ROTA TEMPORÁRIA DE MIGRAÇÃO DO BANCO DE DADOS
 # -------------------------------------------------------------
+
+
 @app.route("/criar-colunas-db")
 def criar_colunas_db():
     try:
@@ -1091,6 +1112,7 @@ def criar_colunas_db():
         return "<h1>✅ Colunas 'origem', 'email' e 'nome' criadas com sucesso no PostgreSQL!</h1>", 200
     except Exception as e:
         return f"<h1>Erro ao criar colunas:</h1><p>{str(e)}</p>", 500
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
