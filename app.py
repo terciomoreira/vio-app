@@ -729,7 +729,7 @@ def twilio_webhook():
             else:
                 texto_recebido = str(resultado_midia)
 
-        # 1. PRIORIDADE: SE FOR MÍDIA COM DADOS EXTRAÍDOS (RECIBO/FOTO)
+       # 1. PRIORIDADE: SE FOR MÍDIA COM DADOS EXTRAÍDOS (RECIBO/FOTO)
         if url_midia and isinstance(resultado_midia, dict) and "total" in resultado_midia:
             salvar_transacao_banco(
                 id_whatsapp=id_usuario, tipo="Saída", valor=v, local=l, category=c, texto_puro=f"Gastei {v}{simbolo} no {l}", lista_itens=lista_itens_extraidos
@@ -739,8 +739,7 @@ def twilio_webhook():
             if lista_itens_extraidos:
                 resposta_texto += f"\n\n📦 *Produtos Detetados ({len(lista_itens_extraidos)}):*"
                 for it in lista_itens_extraidos[:6]:
-                    nome_p = it.get('traduzido') or it.get(
-                        'original') or 'Produto'
+                    nome_p = it.get('traduzido') or it.get('original') or 'Produto'
                     qtd_p = it.get('qtd', 1)
                     tot_p = it.get('total', '0.00')
                     resposta_texto += f"\n• {nome_p} ({qtd_p}x) -> {tot_p} {simbolo}"
@@ -748,13 +747,12 @@ def twilio_webhook():
                     resposta_texto += f"\n_...e mais {len(lista_itens_extraidos) - 6} itens guardados no banco._"
 
             twiml_resp = MessagingResponse()
-            resposta_final_traduzida = traduzir_resposta_vios(
-                resposta_texto, idioma_contexto)
+            resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
             twiml_resp.message(resposta_final_traduzida)
             return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
-        # 2. SEGUNDA PRIORIDADE: COMANDO DE RESUMO
-        elif texto_recebido and verificar_se_e_comando_resumo(texto_recebido):
+   # 2. SEGUNDA PRIORIDADE: COMANDO DE RESUMO
+        if texto_recebido and verificar_se_e_comando_resumo(texto_recebido):
             mensagem_min = texto_recebido.lower()
 
             query_filtro = "data_transacao >= DATE_TRUNC('month', NOW())"
@@ -776,9 +774,7 @@ def twilio_webhook():
             conn = obter_conexao_banco()
             if conn:
                 try:
-                    id_com_mais = "+" + \
-                        id_usuario if not id_usuario.startswith(
-                            "+") else id_usuario
+                    id_com_mais = "+" + id_usuario if not id_usuario.startswith("+") else id_usuario
                     id_sem_mais = id_usuario.replace("+", "")
 
                     with conn.cursor() as cursor:
@@ -810,13 +806,11 @@ def twilio_webhook():
                         link_download = f"{host_app}/download/{id_usuario}"
                         resposta_texto += f"\n\n📥 *Descarrega o Excel consolidado:* {link_download}"
 
-                        resposta_final = traduzir_resposta_vios(
-                            resposta_texto, idioma_contexto)
+                        resposta_final = traduzir_resposta_vios(resposta_texto, idioma_contexto)
                         msg.body(resposta_final)
                     else:
                         resposta_texto = f"📊 *Vio:* Não encontrei nenhuma despesa registada {periodo_texto}."
-                        msg.body(traduzir_resposta_vios(
-                            resposta_texto, idioma_contexto))
+                        msg.body(traduzir_resposta_vios(resposta_texto, idioma_contexto))
 
                     return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
@@ -829,10 +823,8 @@ def twilio_webhook():
                     conn.close()
             else:
                 twiml_resp = MessagingResponse()
-                twiml_resp.message(
-                    "⚠️ *Vio:* O banco de dados está temporariamente inacessível.")
+                twiml_resp.message("⚠️ *Vio:* O banco de dados está temporariamente inacessível.")
                 return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
-
         # 3. TERCEIRA PRIORIDADE: TEXTO COMUM OU MÍDIA SEM TOTAL
         elif texto_recebido:
             if lista_itens_extraidos is None:
