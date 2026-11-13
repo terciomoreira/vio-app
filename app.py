@@ -733,7 +733,7 @@ def twilio_webhook():
                         lista_itens=lista_itens_extraidos
                     )
 
-                    # MONTAGEM DA RESPOSTA DO RECIBO
+                  # MONTAGEM DA RESPOSTA DO RECIBO
                     resposta_texto = f"✅ *Vio:* Entendi! Despesa de *{v}{simbolo}* no *{l}* em *({c})*."
                     
                     if lista_itens_extraidos:
@@ -746,10 +746,28 @@ def twilio_webhook():
                         if len(lista_itens_extraidos) > 6:
                             resposta_texto += f"\n_...e mais {len(lista_itens_extraidos) - 6} itens guardados no banco._"
 
-                    twiml_resp = MessagingResponse()
                     resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
+
+                    # ENVIO ATIVO VIA API REST TWILIO (À PROVA DE TIMEOUT)
+                    try:
+                        twilio_account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
+                        twilio_auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
+                        if twilio_account_sid and twilio_auth_token:
+                            client_twilio = Client(twilio_account_sid, twilio_auth_token)
+                            numero_bot = request.form.get("To", "whatsapp:+14155238886")
+                            client_twilio.messages.create(
+                                from_=numero_bot,
+                                body=resposta_final_traduzida,
+                                to=remetente
+                            )
+                            print(f"📤 [API ATIVA TWILIO] Recibo enviado com sucesso para {remetente}")
+                            return str(MessagingResponse()), 200, {'Content-Type': 'text/xml; charset=utf-8'}
+                    except Exception as e_twilio_api:
+                        print(f"⚠️ Falha no envio ativo Twilio, usando fallback TwiML: {e_twilio_api}")
+
+                    # Fallback TwiML caso ocorra algum contratempo com o cliente REST
+                    twiml_resp = MessagingResponse()
                     twiml_resp.message(resposta_final_traduzida)
-                    print(f"📤 [SUCESSO FOTO] Resposta enviada para {id_usuario}")
                     return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
                 else:
                     texto_recebido = resultado_midia.get("texto_puro", "")
