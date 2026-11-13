@@ -232,7 +232,7 @@ def verificar_se_e_comando_resumo(texto):
     )
     try:
         resposta = ai_client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-1.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json"
@@ -273,7 +273,7 @@ def inteligencia_universal_gemini(texto_ou_transcricao):
     )
     try:
         resposta = ai_client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-1.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json"
@@ -326,7 +326,7 @@ def processar_midia_url(url_midia, mime_type):
         if eh_audio:
             prompt = "Transcreva este áudio com atenção aos valores e locais mencionados. Preserve a linguagem natural."
             resposta_gemini = ai_client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-1.5-flash",
                 contents=[midia_gemini, prompt]
             )
             return {"texto_puro": resposta_gemini.text.strip()}
@@ -357,7 +357,7 @@ def processar_midia_url(url_midia, mime_type):
             )
 
             resposta_gemini = ai_client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-1.5-flash",
                 contents=[midia_gemini, prompt],
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json"
@@ -390,7 +390,7 @@ def traduzir_resposta_vios(mensagem_base, idioma_destino):
     prompt = f"Traduza a seguinte mensagem do sistema financeiro para o idioma correspondente ao código '{idioma_destino}'. Mantenha a formatação Markdown e os Emojis intocados:\n\n{mensagem_base}"
     try:
         res = ai_client.models.generate_content(
-            model="gemini-2.5-flash", contents=prompt)
+            model="gemini-1.5-flash", contents=prompt)
         return res.text.strip()
     except Exception:
         return mensagem_base
