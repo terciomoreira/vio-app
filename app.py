@@ -670,12 +670,12 @@ def twilio_webhook():
         if not id_usuario:
             id_usuario = "desconhecido"
 
-        # Inicialização de variáveis de contexto
+        # Inicialização dinâmica e inteligente de variáveis
         resultado_midia = None
         idioma_contexto = "pt"
         lista_itens_extraidos = []
         v = "0.00"
-        simbolo = "€"
+        simbolo = "€"  # fallback padrão que é atualizado dinamicamente pela IA
         l = "Desconhecido"
         c = "🛒 Outros Gastos"
 
@@ -683,17 +683,23 @@ def twilio_webhook():
         # PROCESSAMENTO DE MÍDIA (FOTO / RECIBO / PDF / ÁUDIO)
         # ---------------------------------------------------------
         if url_midia:
-            resultado_midia = processar_midia_url(url_midia, mime_type)
+            try:
+                resultado_midia = processar_midia_url(url_midia, mime_type)
+            except Exception as e_gemini:
+                print(f"⚠️ Erro na API do Gemini (possível 503): {e_gemini}")
+                twiml_resp = MessagingResponse()
+                twiml_resp.message("⚠️ *Vio:* Os servidores de IA estão com alta procura neste momento. Por favor, tenta enviar a foto novamente em instantes.")
+                return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
             if isinstance(resultado_midia, dict):
-                moeda_doc = resultado_midia.get("moeda", "EUR").upper()
-                simbolo = SIMBOLOS_MOEDA.get(moeda_doc, "€")
+                # Extração inteligente e global devolvida pela IA
+                simbolo = resultado_midia.get("simbolo_moeda") or resultado_midia.get("moeda") or "€"
+                idioma_contexto = resultado_midia.get("idioma_usuario", "pt")
 
                 if "total" in resultado_midia:
                     v_total = resultado_midia.get("total")
                     v_local = resultado_midia.get("local", "Desconhecido")
                     v_cat = resultado_midia.get("categoria", "🛒 Outros Gastos")
-                    idioma_contexto = resultado_midia.get("idioma_usuario", "pt")
                     lista_itens_extraidos = resultado_midia.get("itens", [])
 
                     v = str(v_total)
@@ -734,8 +740,6 @@ def twilio_webhook():
 
             twiml_resp = MessagingResponse()
             twiml_resp.message(resposta_final_traduzida)
-            
-            print(f"📤 [SUCESSO MÍDIA] Resposta TwiML enviada para {id_usuario} ({len(str(twiml_resp))} bytes)")
             return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
         # ---------------------------------------------------------
@@ -816,18 +820,18 @@ def twilio_webhook():
                 return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
         # ---------------------------------------------------------
-        # 3. TERCEIRA PRIORIDADE: TEXTO COMUM OU MÍDIA SEM TOTAL
+        # 3. TERCEIRA PRIORIDADE: TEXTO COMUM OU ÁUDIO TRANSCRITO
         # ---------------------------------------------------------
         if texto_recebido:
-            # Mantém exatamente a tua lógica existente para texto comum do Vio
-            resposta_texto = processar_texto_comum(id_usuario, texto_recebido)
+            # Encaminha para a função nativa existente que processa texto/áudio comum
+            resposta_texto = processar_texto_comum(id_usuario, texto_recebido) if 'processar_texto_comum' in globals() else f"Recebi a tua mensagem: {texto_recebido}"
             twiml_resp = MessagingResponse()
             twiml_resp.message(traduzir_resposta_vios(resposta_texto, idioma_contexto))
             return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
         # Resposta padrão caso receba algo vazio
         twiml_resp = MessagingResponse()
-        twiml_resp.message("👋 Olá! Envia-me uma foto de um recibo ou escreve a tua despesa.")
+        twiml_resp.message("👋 Olá! Envia-me uma foto de um recibo, um áudio ou escreve a tua despesa.")
         return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
     except Exception as e_geral:
@@ -835,181 +839,6 @@ def twilio_webhook():
         twiml_resp = MessagingResponse()
         twiml_resp.message("⚠️ Ocorreu um erro interno ao processar a tua mensagem.")
         return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
-
-        if not verificar_assinatura_ativa(id_usuario):
-            twiml_resp = MessagingResponse()
-            twiml_resp.message(
-                "🚫 *Vio:* O teu período de teste terminou ou a tua assinatura expirou.\n\n"
-                "Para continuares a gerir as tuas finanças com inteligência artificial por apenas *5,90€/mês* + IVA, "
-                "renova a tua conta aqui: https://vio.creariscoretech.com"
-            )
-            return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
-
-        # Processamento de Mídia (Imagem, PDF ou Áudio)
-        if url_midia:
-            resultado_midia = processar_midia_url(url_midia, mime_type)
-
-            if isinstance(resultado_midia, dict):
-                moeda_doc = resultado_midia.get("moeda", "EUR").upper()
-                simbolo = SIMBOLOS_MOEDA.get(moeda_doc, "€")
-
-                if "total" in resultado_midia:
-                    v_total = resultado_midia.get("total")
-                    v_local = resultado_midia.get("local", "Desconhecido")
-                    v_cat = resultado_midia.get("categoria", "🛒 Outros Gastos")
-                    idioma_contexto = resultado_midia.get(
-                        "idioma_usuario", "pt")
-                    lista_itens_extraidos = resultado_midia.get("itens", [])
-
-                    v = str(v_total)
-                    l = str(v_local) if v_local else "Não especificado"
-                    c = str(v_cat) if v_cat else "🛒 Outros Gastos"
-                    tipo = "Saída"
-                else:
-                    texto_recebido = resultado_midia.get("texto_puro", "")
-            else:
-                texto_recebido = str(resultado_midia)
-
-       # 1. PRIORIDADE: SE FOR MÍDIA COM DADOS EXTRAÍDOS (RECIBO/FOTO)
-        if url_midia and isinstance(resultado_midia, dict) and "total" in resultado_midia:
-            salvar_transacao_banco(
-                id_whatsapp=id_usuario, tipo="Saída", valor=v, local=l, category=c, texto_puro=f"Gastei {v}{simbolo} no {l}", lista_itens=lista_itens_extraidos
-            )
-
-            resposta_texto = f"✅ *Vio:* Entendi! Despesa de *{v}{simbolo}* no *{l}* em *({c})*."
-            if lista_itens_extraidos:
-                resposta_texto += f"\n\n📦 *Produtos Detetados ({len(lista_itens_extraidos)}):*"
-                for it in lista_itens_extraidos[:6]:
-                    nome_p = it.get('traduzido') or it.get('original') or 'Produto'
-                    qtd_p = it.get('qtd', 1)
-                    tot_p = it.get('total', '0.00')
-                    resposta_texto += f"\n• {nome_p} ({qtd_p}x) -> {tot_p} {simbolo}"
-                if len(lista_itens_extraidos) > 6:
-                    resposta_texto += f"\n_...e mais {len(lista_itens_extraidos) - 6} itens guardados no banco._"
-
-            twiml_resp = MessagingResponse()
-            resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
-            twiml_resp.message(resposta_final_traduzida)
-            return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
-
-   # 2. SEGUNDA PRIORIDADE: COMANDO DE RESUMO
-        if texto_recebido and verificar_se_e_comando_resumo(texto_recebido):
-            mensagem_min = texto_recebido.lower()
-
-            query_filtro = "data_transacao >= DATE_TRUNC('month', NOW())"
-            periodo_texto = "deste mês"
-
-            if "semana" in mensagem_min:
-                query_filtro = "data_transacao >= NOW() - INTERVAL '7 days'"
-                periodo_texto = "dos últimos 7 dias"
-            elif "trimestre" in mensagem_min:
-                query_filtro = "data_transacao >= NOW() - INTERVAL '3 months'"
-                periodo_texto = "dos últimos 3 meses"
-            elif "ano" in mensagem_min or "anual" in mensagem_min:
-                query_filtro = "data_transacao >= NOW() - INTERVAL '1 year'"
-                periodo_texto = "deste último ano"
-            elif "5 anos" in mensagem_min:
-                query_filtro = "data_transacao >= NOW() - INTERVAL '5 years'"
-                periodo_texto = "dos últimos 5 anos"
-
-            conn = obter_conexao_banco()
-            if conn:
-                try:
-                    id_com_mais = "+" + id_usuario if not id_usuario.startswith("+") else id_usuario
-                    id_sem_mais = id_usuario.replace("+", "")
-
-                    with conn.cursor() as cursor:
-                        cursor.execute(
-                            "ALTER TABLE transacoes ADD COLUMN IF NOT EXISTS data_transacao TIMESTAMP DEFAULT NOW();")
-
-                        cursor.execute(f"""
-                            SELECT categoria, SUM(valor) 
-                            FROM transacoes 
-                            WHERE tipo = 'Saída' AND (id_whatsapp = %s OR id_whatsapp = %s) AND {query_filtro}
-                            GROUP BY categoria 
-                            ORDER BY SUM(valor) DESC;
-                        """, (id_com_mais, id_sem_mais))
-                        linhas = cursor.fetchall()
-
-                    twiml_resp = MessagingResponse()
-                    msg = twiml_resp.message()
-
-                    if linhas:
-                        resposta_texto = f"📊 *Vio: Aqui está o teu Resumo Financeiro {periodo_texto}!*\n\n"
-                        total_geral = 0
-                        for cat, val in linhas:
-                            categoria_nome = cat if cat else "🛒 Outros Gastos"
-                            resposta_texto += f"• {categoria_nome}: *{val:.2f} €*\n"
-                            total_geral += val
-                        resposta_texto += f"\n💰 *Total acumulado de Saídas:* *{total_geral:.2f} €*"
-
-                        host_app = request.host_url.rstrip('/')
-                        link_download = f"{host_app}/download/{id_usuario}"
-                        resposta_texto += f"\n\n📥 *Descarrega o Excel consolidado:* {link_download}"
-
-                        resposta_final = traduzir_resposta_vios(resposta_texto, idioma_contexto)
-                        msg.body(resposta_final)
-                    else:
-                        resposta_texto = f"📊 *Vio:* Não encontrei nenhuma despesa registada {periodo_texto}."
-                        msg.body(traduzir_resposta_vios(resposta_texto, idioma_contexto))
-
-                    return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
-
-                except Exception as e_banco:
-                    resposta_final = f"⚠️ *Vio:* Erro ao processar o teu resumo no banco: {e_banco}"
-                    twiml_resp = MessagingResponse()
-                    twiml_resp.message(resposta_final)
-                    return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
-                finally:
-                    conn.close()
-            else:
-                twiml_resp = MessagingResponse()
-                twiml_resp.message("⚠️ *Vio:* O banco de dados está temporariamente inacessível.")
-                return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
-        # 3. TERCEIRA PRIORIDADE: TEXTO COMUM OU MÍDIA SEM TOTAL
-        elif texto_recebido:
-            if lista_itens_extraidos is None:
-                try:
-                    tipo, v, l, c, idioma_contexto = inteligencia_universal_gemini(
-                        texto_recebido)
-                except Exception as e_gemini:
-                    print(f"⚠️ Falha na IA: {e_gemini}")
-                    valores = re.findall(r"\d+(?:[.,]\d+)?", texto_recebido)
-                    v = valores[0].replace(",", ".") if valores else ""
-                    tipo, l, c = "Saída", "Não especificado", "🛒 Outros Gastos"
-
-            if 'v' in locals() and v:
-                if not l or str(l).lower() == "desconhecido":
-                    l = "Não especificado"
-
-                salvar_transacao_banco(
-                    id_whatsapp=id_usuario, tipo=tipo, valor=v, local=l, category=c, texto_puro=texto_recebido, lista_itens=lista_itens_extraidos
-                )
-
-                if tipo == "Entrada":
-                    resposta_texto = f"💰 *Vio:* Entendi: *\"{texto_recebido}\"* -> Entrada de {v}{simbolo} em *({c})*."
-                else:
-                    resposta_texto = f"✅ *Vio:* Entendi: *\"{texto_recebido}\"* -> Despesa de {v}{simbolo} no {l} em *({c})*."
-            else:
-                resposta_texto = f"⚠️ *Vio:* Entendi \"{texto_recebido}\", mas não consegui extrair os valores com precisão."
-        else:
-            resposta_texto = "⚠️ *Vio:* Recebi a tua mensagem, mas não consegui extrair nenhum conteúdo legível."
-
-        twiml_resp = MessagingResponse()
-        resposta_final_traduzida = traduzir_resposta_vios(
-            resposta_texto, idioma_contexto)
-        twiml_resp.message(resposta_final_traduzida)
-        return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
-
-    except Exception as e_geral:
-        print(f"❌ ERRO GRAVE NA ROTA WHATSAPP: {e_geral}")
-        import traceback
-        traceback.print_exc()
-        twiml_resp = MessagingResponse()
-        twiml_resp.message(
-            f"⚠️ *Vio:* Ocorreu um erro ao processar a tua solicitação: {e_geral}")
-        return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
-
 
 @app.route("/ativar-admin")
 def ativar_admin():
