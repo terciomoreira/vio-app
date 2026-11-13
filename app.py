@@ -653,7 +653,6 @@ def stripe_webhook():
         print(f"❌ Falha crítica no processamento do webhook: {e}")
         return "Erro Interno", 400
 
-
 # =========================================================
 # WEBHOOK DO TWILIO (MECANISMO CENTRAL VIO)
 # =========================================================
@@ -670,14 +669,15 @@ def twilio_webhook():
         if not id_usuario:
             id_usuario = "desconhecido"
 
-        # Inicialização dinâmica e inteligente de variáveis
+        # Inicialização inteligente de variáveis
         resultado_midia = None
         idioma_contexto = "pt"
         lista_itens_extraidos = []
         v = "0.00"
-        simbolo = "€"  # fallback padrão que é atualizado dinamicamente pela IA
+        simbolo = "€"
         l = "Desconhecido"
         c = "🛒 Outros Gastos"
+        tipo = "Saída"
 
         # ---------------------------------------------------------
         # PROCESSAMENTO DE MÍDIA (FOTO / RECIBO / PDF / ÁUDIO)
@@ -686,15 +686,15 @@ def twilio_webhook():
             try:
                 resultado_midia = processar_midia_url(url_midia, mime_type)
             except Exception as e_gemini:
-                print(f"⚠️ Erro na API do Gemini (possível 503): {e_gemini}")
+                print(f"⚠️ Erro na API do Gemini: {e_gemini}")
                 twiml_resp = MessagingResponse()
-                twiml_resp.message("⚠️ *Vio:* Os servidores de IA estão com alta procura neste momento. Por favor, tenta enviar a foto novamente em instantes.")
+                twiml_resp.message("⚠️ *Vio:* Os servidores de IA estão ocupados. Tenta novamente em instantes.")
                 return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
             if isinstance(resultado_midia, dict):
-                # Extração inteligente e global devolvida pela IA
                 simbolo = resultado_midia.get("simbolo_moeda") or resultado_midia.get("moeda") or "€"
                 idioma_contexto = resultado_midia.get("idioma_usuario", "pt")
+                tipo = resultado_midia.get("tipo", "Saída")
 
                 if "total" in resultado_midia:
                     v_total = resultado_midia.get("total")
@@ -711,16 +711,16 @@ def twilio_webhook():
                 texto_recebido = str(resultado_midia)
 
         # ---------------------------------------------------------
-        # 1. PRIORIDADE: SE FOR MÍDIA COM DADOS EXTRAÍDOS (RECIBO/FOTO)
+        # 1. PRIORIDADE: MÍDIA COM DADOS EXTRAÍDOS (RECIBO/FOTO)
         # ---------------------------------------------------------
         if url_midia and isinstance(resultado_midia, dict) and "total" in resultado_midia:
             salvar_transacao_banco(
                 id_whatsapp=id_usuario, 
-                tipo="Saída", 
+                tipo=tipo, 
                 valor=v, 
                 local=l, 
                 category=c, 
-                texto_puro=f"Gastei {v}{simbolo} no {l}", 
+                texto_puro=f"Despesa de {v}{simbolo} no {l}", 
                 lista_itens=lista_itens_extraidos
             )
 
@@ -736,9 +736,8 @@ def twilio_webhook():
                 if len(lista_itens_extraidos) > 6:
                     resposta_texto += f"\n_...e mais {len(lista_itens_extraidos) - 6} itens guardados no banco._"
 
-            resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
-
             twiml_resp = MessagingResponse()
+            resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
             twiml_resp.message(resposta_final_traduzida)
             return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
@@ -747,7 +746,6 @@ def twilio_webhook():
         # ---------------------------------------------------------
         if texto_recebido and verificar_se_e_comando_resumo(texto_recebido):
             mensagem_min = texto_recebido.lower()
-
             query_filtro = "data_transacao >= DATE_TRUNC('month', NOW())"
             periodo_texto = "deste mês"
 
@@ -771,9 +769,7 @@ def twilio_webhook():
                     id_sem_mais = id_usuario.replace("+", "")
 
                     with conn.cursor() as cursor:
-                        cursor.execute(
-                            "ALTER TABLE transacoes ADD COLUMN IF NOT EXISTS data_transacao TIMESTAMP DEFAULT NOW();")
-
+                        cursor.execute("ALTER TABLE transacoes ADD COLUMN IF NOT EXISTS data_transacao TIMESTAMP DEFAULT NOW();")
                         cursor.execute(f"""
                             SELECT categoria, SUM(valor) 
                             FROM transacoes 
@@ -799,32 +795,40 @@ def twilio_webhook():
                         link_download = f"{host_app}/download/{id_usuario}"
                         resposta_texto += f"\n\n📥 *Descarrega o Excel consolidado:* {link_download}"
 
-                        resposta_final = traduzir_resposta_vios(resposta_texto, idioma_contexto)
-                        msg.body(resposta_final)
+                        msg.body(traduzir_resposta_vios(resposta_texto, idioma_contexto))
                     else:
                         resposta_texto = f"📊 *Vio:* Não encontrei nenhuma despesa registada {periodo_texto}."
                         msg.body(traduzir_resposta_vios(resposta_texto, idioma_contexto))
 
                     return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
-
                 except Exception as e_banco:
-                    resposta_final = f"⚠️ *Vio:* Erro ao processar o teu resumo no banco: {e_banco}"
                     twiml_resp = MessagingResponse()
-                    twiml_resp.message(resposta_final)
+                    twiml_resp.message(f"⚠️ *Vio:* Erro ao processar resumo: {e_banco}")
                     return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
                 finally:
                     conn.close()
-            else:
-                twiml_resp = MessagingResponse()
-                twiml_resp.message("⚠️ *Vio:* O banco de dados está temporariamente inacessível.")
-                return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
         # ---------------------------------------------------------
         # 3. TERCEIRA PRIORIDADE: TEXTO COMUM OU ÁUDIO TRANSCRITO
         # ---------------------------------------------------------
         if texto_recebido:
-            # Encaminha para a função nativa existente que processa texto/áudio comum
-            resposta_texto = processar_texto_comum(id_usuario, texto_recebido) if 'processar_texto_comum' in globals() else f"Recebi a tua mensagem: {texto_recebido}"
+            # Restaura a chamada inteligente original do Vio para texto/áudio comum
+            try:
+                tipo, v, l, c, idioma_contexto = inteligencia_universal_gemini(texto_recebido)
+            except Exception:
+                tipo, v, l, c, idioma_contexto = "Saída", "0.00", "Não especificado", "🛒 Outros Gastos", "pt"
+
+            if v and str(v) != "0.00":
+                salvar_transacao_banco(
+                    id_whatsapp=id_usuario, tipo=tipo, valor=v, local=l, category=c, texto_puro=texto_recebido, lista_itens=[]
+                )
+                if tipo == "Entrada":
+                    resposta_texto = f"💰 *Vio:* Entendi: *\"{texto_recebido}\"* -> Entrada de *{v}{simbolo}* em *({c})*."
+                else:
+                    resposta_texto = f"✅ *Vio:* Entendi: *\"{texto_recebido}\"* -> Despesa de *{v}{simbolo}* no *{l}* em *({c})*."
+            else:
+                resposta_texto = f"💬 *Vio:* Recebi a tua mensagem: \"{texto_recebido}\"."
+
             twiml_resp = MessagingResponse()
             twiml_resp.message(traduzir_resposta_vios(resposta_texto, idioma_contexto))
             return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
@@ -835,7 +839,7 @@ def twilio_webhook():
         return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
     except Exception as e_geral:
-        print(f"❌ Falha crítica no webhook do Twilio: {e_geral}")
+        print(f"❌ ERRO GRAVE NA ROTA WHATSAPP: {e_geral}")
         twiml_resp = MessagingResponse()
         twiml_resp.message("⚠️ Ocorreu um erro interno ao processar a tua mensagem.")
         return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
