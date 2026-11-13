@@ -662,7 +662,7 @@ def twilio_webhook():
         remetente = request.form.get("From", "")
         texto_recebido = request.form.get("Body", "")
         url_midia = request.form.get("MediaUrl0", "")
-        mime_type = request.form.get("MediaContentType0", "")
+        mime_type = request.form.get("MediaContentType0", "").lower()
 
         # Identificação limpa do usuário
         id_usuario = remetente.replace("whatsapp:", "").strip()
@@ -680,15 +680,31 @@ def twilio_webhook():
         tipo = "Saída"
 
         # ---------------------------------------------------------
-        # PROCESSAMENTO DE MÍDIA (FOTO / RECIBO / PDF / ÁUDIO)
+        # SE FOR ÁUDIO, TRATAMOS COMO TRANSCRIÇÃO DE TEXTO
+        # ---------------------------------------------------------
+        if url_midia and ("audio" in mime_type or "ogg" in mime_type or "amr" in mime_type):
+            try:
+                # Processa o áudio através da função existente de mídia/áudio
+                resultado_audio = processar_midia_url(url_midia, mime_type)
+                if isinstance(resultado_audio, dict):
+                    texto_recebido = resultado_audio.get("texto_puro", "")
+                else:
+                    texto_recebido = str(resultado_audio)
+                url_midia = "" # Limpa para não cair no fluxo de recibo/foto
+            except Exception as e_audio:
+                print(f"⚠️ Erro ao processar áudio: {e_audio}")
+                texto_recebido = "Erro ao transcrever áudio"
+
+        # ---------------------------------------------------------
+        # 1. PRIORIDADE: FOTO / RECIBO / DOCUMENTO COM TOTAL
         # ---------------------------------------------------------
         if url_midia:
             try:
                 resultado_midia = processar_midia_url(url_midia, mime_type)
             except Exception as e_gemini:
-                print(f"⚠️ Erro na API do Gemini: {e_gemini}")
+                print(f"⚠️ Erro na API do Gemini para mídia: {e_gemini}")
                 twiml_resp = MessagingResponse()
-                twiml_resp.message("⚠️ *Vio:* Os servidores de IA estão ocupados. Tenta novamente em instantes.")
+                twiml_resp.message("⚠️ *Vio:* Os servidores de IA estão ocupados. Tenta enviar a foto novamente em instantes.")
                 return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
             if isinstance(resultado_midia, dict):
@@ -705,41 +721,38 @@ def twilio_webhook():
                     v = str(v_total)
                     l = str(v_local) if v_local else "Não especificado"
                     c = str(v_cat) if v_cat else "🛒 Outros Gastos"
+
+                    # SALVA NO BANCO DE DADOS
+                    salvar_transacao_banco(
+                        id_whatsapp=id_usuario, 
+                        tipo=tipo, 
+                        valor=v, 
+                        local=l, 
+                        category=c, 
+                        texto_puro=f"Despesa de {v}{simbolo} no {l}", 
+                        lista_itens=lista_itens_extraidos
+                    )
+
+                    # MONTAGEM DA RESPOSTA DO RECIBO
+                    resposta_texto = f"✅ *Vio:* Entendi! Despesa de *{v}{simbolo}* no *{l}* em *({c})*."
+                    
+                    if lista_itens_extraidos:
+                        resposta_texto += f"\n\n📦 *Produtos Detetados ({len(lista_itens_extraidos)}):*"
+                        for it in lista_itens_extraidos[:6]:
+                            nome_p = it.get('traduzido') or it.get('original') or 'Produto'
+                            qtd_p = it.get('qtd', 1)
+                            tot_p = it.get('total', '0.00')
+                            resposta_texto += f"\n• {nome_p} ({qtd_p}x) -> {tot_p} {simbolo}"
+                        if len(lista_itens_extraidos) > 6:
+                            resposta_texto += f"\n_...e mais {len(lista_itens_extraidos) - 6} itens guardados no banco._"
+
+                    twiml_resp = MessagingResponse()
+                    resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
+                    twiml_resp.message(resposta_final_traduzida)
+                    print(f"📤 [SUCESSO FOTO] Resposta enviada para {id_usuario}")
+                    return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
                 else:
                     texto_recebido = resultado_midia.get("texto_puro", "")
-            else:
-                texto_recebido = str(resultado_midia)
-
-        # ---------------------------------------------------------
-        # 1. PRIORIDADE: MÍDIA COM DADOS EXTRAÍDOS (RECIBO/FOTO)
-        # ---------------------------------------------------------
-        if url_midia and isinstance(resultado_midia, dict) and "total" in resultado_midia:
-            salvar_transacao_banco(
-                id_whatsapp=id_usuario, 
-                tipo=tipo, 
-                valor=v, 
-                local=l, 
-                category=c, 
-                texto_puro=f"Despesa de {v}{simbolo} no {l}", 
-                lista_itens=lista_itens_extraidos
-            )
-
-            resposta_texto = f"✅ *Vio:* Entendi! Despesa de *{v}{simbolo}* no *{l}* em *({c})*."
-            
-            if lista_itens_extraidos:
-                resposta_texto += f"\n\n📦 *Produtos Detetados ({len(lista_itens_extraidos)}):*"
-                for it in lista_itens_extraidos[:6]:
-                    nome_p = it.get('traduzido') or it.get('original') or 'Produto'
-                    qtd_p = it.get('qtd', 1)
-                    tot_p = it.get('total', '0.00')
-                    resposta_texto += f"\n• {nome_p} ({qtd_p}x) -> {tot_p} {simbolo}"
-                if len(lista_itens_extraidos) > 6:
-                    resposta_texto += f"\n_...e mais {len(lista_itens_extraidos) - 6} itens guardados no banco._"
-
-            twiml_resp = MessagingResponse()
-            resposta_final_traduzida = traduzir_resposta_vios(resposta_texto, idioma_contexto)
-            twiml_resp.message(resposta_final_traduzida)
-            return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
         # ---------------------------------------------------------
         # 2. SEGUNDA PRIORIDADE: COMANDO DE RESUMO
@@ -812,7 +825,6 @@ def twilio_webhook():
         # 3. TERCEIRA PRIORIDADE: TEXTO COMUM OU ÁUDIO TRANSCRITO
         # ---------------------------------------------------------
         if texto_recebido:
-            # Restaura a chamada inteligente original do Vio para texto/áudio comum
             try:
                 tipo, v, l, c, idioma_contexto = inteligencia_universal_gemini(texto_recebido)
             except Exception:
@@ -840,8 +852,10 @@ def twilio_webhook():
 
     except Exception as e_geral:
         print(f"❌ ERRO GRAVE NA ROTA WHATSAPP: {e_geral}")
+        import traceback
+        traceback.print_exc()
         twiml_resp = MessagingResponse()
-        twiml_resp.message("⚠️ Ocorreu um erro interno ao processar a tua mensagem.")
+        twiml_resp.message(f"⚠️ *Vio:* Ocorreu um erro ao processar a tua solicitação.")
         return str(twiml_resp), 200, {'Content-Type': 'text/xml; charset=utf-8'}
 
 @app.route("/ativar-admin")
